@@ -16,40 +16,38 @@ def send_message(chat_id, text, keyboard=None):
 def get_main_menu():
     return {
         "inline_keyboard": [
-            [{"text": "🔮 شروع پیشگویی", "callback_data": "start_fortune"}],
-            [{"text": "📖 راهنما", "callback_data": "help"}]
+            [{"text": "💳 پرداخت و شروع تحلیل", "callback_data": "payment"}]
         ]
     }
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = request.get_json()
-    if not update:
-        return "ok", 200
-    
-    if 'message' in update:
+    if update and 'message' in update:
         chat_id = update['message']['chat']['id']
         text = update['message'].get('text', '')
-        
         if text == '/start':
-            send_message(chat_id, "🔮 به ربات جفر خوش آمدی!\n\nلطفاً یکی از گزینه‌ها رو انتخاب کن:", get_main_menu())
-        else:
-            send_message(chat_id, f"📩 پیام شما: {text}\n\nاز منو استفاده کنید.")
-    
-    elif 'callback_query' in update:
+            send_message(chat_id, """
+📚 سامانه جامع مطالعات علوم سنتی
+
+این سامانه بر پایه هزاران منبع خطی، سنگی و نسخه‌های قدیمی
+طراحی شده است.
+
+هدف از ایجاد این مجموعه، گردآوری و تحلیل اطلاعات پراکنده
+در منابع مختلف و ارائه نتیجه‌ای منظم و یکپارچه است.
+
+برای استفاده از سامانه ابتدا هزینه دسترسی را پرداخت نمایید.
+""", get_main_menu())
+    elif update and 'callback_query' in update:
         chat_id = update['callback_query']['from']['id']
         data = update['callback_query']['data']
-        
-        if data == 'start_fortune':
-            send_message(chat_id, "🔮 در حال پیشگویی...\n\nاین بخش به زودی تکمیل میشه.")
-        elif data == 'help':
-            send_message(chat_id, "📖 راهنما:\n\n/start - منوی اصلی\n\nاین ربات برای پیشگویی با جفر طراحی شده.")
-    
+        if data == 'payment':
+            send_message(chat_id, "💳 درگاه پرداخت در مرحله بعد متصل خواهد شد.")
     return "ok", 200
 
 @app.route('/')
 def home():
-    return "ربات جفر فعال است", 200
+    return "ربات فعال است", 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)

@@ -1,10 +1,11 @@
 from flask import Flask, request
 import requests
 import json
-ا
+import os
+
 app = Flask(__name__)
 
-TOKEN = "8624726972:AAHa89X4pWrLaD7c-GI3OUjmx7FuSL-5pQQ"
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8624726972:AAHa89X4pWrLaD7c-GI3OUjmx7FuSL-5pQQ')
 
 def send_message(chat_id, text, keyboard=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -47,6 +48,13 @@ def webhook():
         data = update['callback_query']['data']
         if data == 'payment':
             send_message(chat_id, "💳 درگاه پرداخت در مرحله بعد متصل خواهد شد.")
+    
+    return "ok", 200
+
+@app.route('/')
+def home():
+    return "ربات فعال است", 200
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

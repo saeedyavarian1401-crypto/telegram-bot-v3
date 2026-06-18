@@ -5,33 +5,9 @@ import os
 
 app = Flask(__name__)
 
-TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8624726972:AAHa89X4pWrLaD7c-GI3OUjmx7FuSL-5pQQ')
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-def send_message(chat_id, text, keyboard=None):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    if keyboard:
-        payload["reply_markup"] = json.dumps(keyboard)
-    requests.post(url, json=payload)
-
-def get_main_menu():
-    return {
-        "inline_keyboard": [
-            [{"text": "💳 پرداخت و شروع تحلیل", "callback_data": "payment"}]
-        ]
-    }
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = request.get_json()
-    if not update:
-        return "ok", 200
-    
-    if 'message' in update:
-        chat_id = update['message']['chat']['id']
-        text = update['message'].get('text', '')
-        if text == '/start':
-            send_message(chat_id, """
+WELCOME_TEXT = """
 📚 سامانه جامع مطالعات علوم سنتی
 
 این سامانه بر پایه هزاران منبع خطی، سنگی و نسخه‌های قدیمی
@@ -41,20 +17,83 @@ def webhook():
 در منابع مختلف و ارائه نتیجه‌ای منظم و یکپارچه است.
 
 برای استفاده از سامانه ابتدا هزینه دسترسی را پرداخت نمایید.
-""", get_main_menu())
-    
-    elif 'callback_query' in update:
-        chat_id = update['callback_query']['from']['id']
-        data = update['callback_query']['data']
-        if data == 'payment':
-            send_message(chat_id, "💳 درگاه پرداخت در مرحله بعد متصل خواهد شد.")
-    
+"""
+
+def send_message(chat_id, text, keyboard=None):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if keyboard:
+        payload["reply_markup"] = json.dumps(keyboard)
+
+    requests.post(url, json=payload)
+
+
+def get_main_menu():
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "💳 پرداخت و شروع تحلیل",
+                    "callback_data": "payment"
+                }
+            ]
+        ]
+    }
+
+
+@app.route("/")
+def home():
+    return "Bot is running", 200
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+
+    update = request.get_json()
+
+    if not update:
+        return "ok", 200
+
+    # دستور استارت
+    if "message" in update:
+
+        chat_id = update["message"]["chat"]["id"]
+        text = update["message"].get("text", "")
+
+        if text == "/start":
+
+            send_message(
+                chat_id,
+                WELCOME_TEXT,
+                get_main_menu()
+            )
+
+    # کلیک روی دکمه پرداخت
+    elif "callback_query" in update:
+
+        chat_id = update["callback_query"]["from"]["id"]
+        data = update["callback_query"]["data"]
+
+        if data == "payment":
+
+            send_message(
+                chat_id,
+                "💳 بخش پرداخت در مرحله بعد متصل خواهد شد."
+            )
+
     return "ok", 200
 
-@app.route('/')
-def home():
-    return "ربات فعال است", 200
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )

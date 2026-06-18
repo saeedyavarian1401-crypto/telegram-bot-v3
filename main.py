@@ -23,7 +23,10 @@ def get_main_menu():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = request.get_json()
-    if update and 'message' in update:
+    if not update:
+        return "ok", 200
+    
+    if 'message' in update:
         chat_id = update['message']['chat']['id']
         text = update['message'].get('text', '')
         if text == '/start':
@@ -38,11 +41,13 @@ def webhook():
 
 برای استفاده از سامانه ابتدا هزینه دسترسی را پرداخت نمایید.
 """, get_main_menu())
-    elif update and 'callback_query' in update:
+    
+    elif 'callback_query' in update:
         chat_id = update['callback_query']['from']['id']
         data = update['callback_query']['data']
         if data == 'payment':
             send_message(chat_id, "💳 درگاه پرداخت در مرحله بعد متصل خواهد شد.")
+    
     return "ok", 200
 
 @app.route('/')

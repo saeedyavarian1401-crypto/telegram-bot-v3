@@ -19,6 +19,7 @@ WELCOME_TEXT = """
 برای استفاده از سامانه ابتدا هزینه دسترسی را پرداخت نمایید.
 """
 
+
 def send_message(chat_id, text, keyboard=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
@@ -46,6 +47,19 @@ def get_main_menu():
     }
 
 
+def get_payment_menu():
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "💳 پرداخت 50,000 تومان",
+                    "callback_data": "pay_50000"
+                }
+            ]
+        ]
+    }
+
+
 @app.route("/")
 def home():
     return "Bot is running", 200
@@ -59,7 +73,6 @@ def webhook():
     if not update:
         return "ok", 200
 
-    # دستور استارت
     if "message" in update:
 
         chat_id = update["message"]["chat"]["id"]
@@ -73,7 +86,6 @@ def webhook():
                 get_main_menu()
             )
 
-    # کلیک روی دکمه پرداخت
     elif "callback_query" in update:
 
         chat_id = update["callback_query"]["from"]["id"]
@@ -83,7 +95,28 @@ def webhook():
 
             send_message(
                 chat_id,
-                "💳 بخش پرداخت در مرحله بعد متصل خواهد شد."
+                """
+💳 هزینه دسترسی
+
+مبلغ: 50,000 تومان
+
+پس از پرداخت، امکان انجام یک تحلیل کامل
+برای یک فرد از تمامی روش‌های موجود در سامانه
+فعال خواهد شد.
+                """,
+                get_payment_menu()
+            )
+
+        elif data == "pay_50000":
+
+            send_message(
+                chat_id,
+                """
+✅ درخواست پرداخت ثبت شد.
+
+درگاه پرداخت در مرحله بعد
+به سامانه متصل خواهد شد.
+                """
             )
 
     return "ok", 200

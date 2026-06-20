@@ -21,28 +21,6 @@ def send_message(chat_id, text, keyboard=None):
     requests.post(url, json=payload)
 
 # =========================
-# 📋 منوی شیشه‌ای (داخل چت)
-# =========================
-def main_menu():
-    return {
-        "inline_keyboard": [
-            [{"text": "🔍 شروع تحلیل", "callback_data": "start_analysis"}],
-            [{"text": "💳 پرداخت (نمایشی)", "callback_data": "payment_demo"}],
-            [{"text": "📖 درباره سامانه", "callback_data": "about"}],
-            [{"text": "📂 تاریخچه تحلیل‌ها", "callback_data": "history"}],
-            [{"text": "📜 قوانین", "callback_data": "rules"}],
-            [{"text": "📩 تماس با ادمین", "callback_data": "contact_admin"}]
-        ]
-    }
-
-def cancel_keyboard():
-    return {
-        "keyboard": [["❌ لغو"]],
-        "resize_keyboard": True,
-        "one_time_keyboard": True
-    }
-
-# =========================
 # 📋 منوی آبی (Command Menu)
 # =========================
 def set_commands():

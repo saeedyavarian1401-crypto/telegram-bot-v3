@@ -34,6 +34,13 @@ def main_menu():
         ]
     }
 
+def cancel_keyboard():
+    return {
+        "keyboard": [["❌ لغو"]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
+
 # =========================
 # 🧠 مدیریت اطلاعات کاربر
 # =========================
@@ -80,6 +87,18 @@ def process_analysis(chat_id, text):
 امتیاز نهایی: {result['final_score']}
 وضعیت: {result['status']}
 """)
+        del user_data[chat_id]
+
+    elif step == "contact_message":
+        # ارسال پیام کاربر به ادمین
+        send_message(
+            ADMIN_CHAT_ID,
+            f"📩 پیام جدید از کاربر {chat_id}:\n\n{text}"
+        )
+        send_message(
+            chat_id,
+            "✅ پیام شما به ادمین ارسال شد. به زودی پاسخ داده می‌شود."
+        )
         del user_data[chat_id]
 
 # =========================
@@ -186,14 +205,11 @@ def webhook():
             )
 
         elif data == "contact_admin":
-            # پیام به ادمین
-            send_message(
-                ADMIN_CHAT_ID,
-                f"📩 پیام جدید از کاربر {chat_id}\n\nدرخواست تماس با ادمین"
-            )
+            user_data[chat_id] = {"step": "contact_message"}
             send_message(
                 chat_id,
-                "✅ پیام شما به ادمین ارسال شد. به زودی پاسخ داده می‌شود."
+                "✏️ لطفاً **پیام خود** را برای ادمین بنویسید:",
+                cancel_keyboard()
             )
 
     return "ok", 200

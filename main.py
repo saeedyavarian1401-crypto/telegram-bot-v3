@@ -21,7 +21,7 @@ def send_message(chat_id, text, keyboard=None):
     requests.post(url, json=payload)
 
 # =========================
-# 📋 منوی شیشه‌ای
+# 📋 منوی شیشه‌ای (داخل چت)
 # =========================
 def main_menu():
     return {
@@ -41,6 +41,22 @@ def cancel_keyboard():
         "resize_keyboard": True,
         "one_time_keyboard": True
     }
+
+# =========================
+# 📋 منوی آبی (Command Menu)
+# =========================
+def set_commands():
+    url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
+    commands = [
+        {"command": "start", "description": "🔄 شروع مجدد"},
+        {"command": "help", "description": "📖 راهنمای سامانه"},
+        {"command": "analyze", "description": "🔍 شروع تحلیل جدید"},
+        {"command": "history", "description": "📂 تاریخچه تحلیل‌ها"},
+        {"command": "rules", "description": "📜 قوانین"},
+        {"command": "about", "description": "📖 درباره سامانه"},
+        {"command": "contact", "description": "📩 تماس با ادمین"}
+    ]
+    requests.post(url, json={"commands": commands})
 
 # =========================
 # 🧠 مدیریت اطلاعات کاربر
@@ -156,20 +172,8 @@ MINERALS = {
     "زحل": {"metal": "سرب", "plant": "بنفشه", "animal": "خفاش", "incense": "صمغ أسود", "color": "سیاه"}
 }
 
-PURIFICATION_METHODS = {
-    "طلا": "با آب زمزم و خاک کربلا ۷ مرتبه شسته شود سپس با عود عنبر بخور داده شود",
-    "نقره": "با آب باران ۳ مرتبه شسته شود سپس با عود صندل بخور داده شود",
-    "مس": "با آب و سرکه شسته شود سپس در آفتاب گذاشته شود",
-    "سرب": "با آب و نمک شسته شود سپس با عود بخور داده شود",
-    "زئبق": "با آب و گلاب شسته شود (با احتیاط کامل)",
-    "آهن": "با آب و زاج سفید شسته شود سپس با دمشقی بخور داده شود"
-}
-
 def get_mineral(planet):
     return MINERALS.get(planet, {"metal": "نامشخص", "plant": "نامشخص", "animal": "نامشخص", "incense": "نامشخص", "color": "نامشخص"})
-
-def get_purification(metal):
-    return PURIFICATION_METHODS.get(metal, "با آب پاک شسته شود و با عود بخور داده شود")
 
 # =========================
 # جفر ۳۶ و ۳۶۰
@@ -178,31 +182,31 @@ def jafar_36(question):
     total = abjad_sum(question)
     remainder = total % 36
     if remainder == 0:
-        return {"answer": "✅ بله - قطعاً انجام می‌شود", "score": 95, "advice": "با اطمینان کامل اقدام کنید"}
+        return {"answer": "✅ بله - قطعاً انجام می‌شود", "score": 95, "advice": "با اطمینان کامل اقدام کنید", "remainder": remainder}
     elif remainder <= 9:
-        return {"answer": "✅ بله - با احتمال زیاد", "score": 85, "advice": "مانعی نیست، اقدام کن"}
+        return {"answer": "✅ بله - با احتمال زیاد", "score": 85, "advice": "مانعی نیست، اقدام کن", "remainder": remainder}
     elif remainder <= 18:
-        return {"answer": "⚠️ بله - با احتیاط", "score": 65, "advice": "صدقه بدهید و توکل کنید"}
+        return {"answer": "⚠️ بله - با احتیاط", "score": 65, "advice": "صدقه بدهید و توکل کنید", "remainder": remainder}
     elif remainder <= 27:
-        return {"answer": "❓ شاید - مصلحت نیست", "score": 50, "advice": "چند روز صبر کنید"}
+        return {"answer": "❓ شاید - مصلحت نیست", "score": 50, "advice": "چند روز صبر کنید", "remainder": remainder}
     else:
-        return {"answer": "❌ خیر - مشکل دارد", "score": 30, "advice": "بهتر است منصرف شوید"}
+        return {"answer": "❌ خیر - مشکل دارد", "score": 30, "advice": "بهتر است منصرف شوید", "remainder": remainder}
 
 def jafar_360(question, name, mother):
     total = abjad_sum(question) + abjad_sum(name) + abjad_sum(mother)
     remainder = total % 360
     if remainder < 30:
-        return {"answer": "✅ بله قطعی - گشایش بزرگ", "score": 98, "advice": "بدون تردید اقدام کن", "degree": "عالی"}
+        return {"answer": "✅ بله قطعی - گشایش بزرگ", "score": 98, "advice": "بدون تردید اقدام کن", "degree": "عالی", "remainder": remainder}
     elif remainder < 90:
-        return {"answer": "✅ بله - موفقیت", "score": 85, "advice": "زمان مناسبه، اقدام کن", "degree": "خوب"}
+        return {"answer": "✅ بله - موفقیت", "score": 85, "advice": "زمان مناسبه، اقدام کن", "degree": "خوب", "remainder": remainder}
     elif remainder < 150:
-        return {"answer": "⚠️ احتمالاً - با تلاش", "score": 65, "advice": "تلاش بیشتری کن", "degree": "متوسط"}
+        return {"answer": "⚠️ احتمالاً - با تلاش", "score": 65, "advice": "تلاش بیشتری کن", "degree": "متوسط", "remainder": remainder}
     elif remainder < 210:
-        return {"answer": "❓ شاید - صبر کن", "score": 50, "advice": "فعلاً صبر کن", "degree": "متوسط"}
+        return {"answer": "❓ شاید - صبر کن", "score": 50, "advice": "فعلاً صبر کن", "degree": "متوسط", "remainder": remainder}
     elif remainder < 270:
-        return {"answer": "❌ خیر - مانع داره", "score": 35, "advice": "بهتره منصرف شی", "degree": "ضعیف"}
+        return {"answer": "❌ خیر - مانع داره", "score": 35, "advice": "بهتره منصرف شی", "degree": "ضعیف", "remainder": remainder}
     else:
-        return {"answer": "❌ خیر قطعی - مشکل داره", "score": 20, "advice": "اصلاً مناسب نیست", "degree": "خیلی ضعیف"}
+        return {"answer": "❌ خیر قطعی - مشکل داره", "score": 20, "advice": "اصلاً مناسب نیست", "degree": "خیلی ضعیف", "remainder": remainder}
 
 # =========================
 # رمل ۸ و ۱۶ شکل
@@ -331,7 +335,7 @@ def basts_azizi(name, mother):
     return {"malak": malak, "awn": awn, "total_abjad": total_abjad}
 
 # =========================
-# 🧠 تحلیل کامل با همه فرمول‌ها
+# 🧠 تحلیل کامل با نمایش مراحل
 # =========================
 def analyze_with_details(data):
     name = data.get('name', '')
@@ -348,32 +352,33 @@ def analyze_with_details(data):
     element = zodiac["element"]
     mineral = get_mineral(planet)
 
-    # 2. جفر ۳۶ و ۳۶۰
-    j36 = jafar_36(question)
-    j360 = jafar_360(question, name, mother)
-
-    # 3. رمل
-    raml8 = raml_extract(name, use_16=False)
-    raml16 = raml_extract(name, use_16=True)
-
-    # 4. همزاد
-    hamzad = check_hamzad([])
-    hamzad_names = hamzad_name(name)
-
-    # 5. تکسیر و بسط
-    taksir = taksir_correct(name + mother)
-    basts = basts_azizi(name, mother)
-
-    # 6. زایجه عدل
-    zayejah = zayejah_adl(question, day, hour)
-
-    # 7. اوقات سعد و نحس
-    saad_nahs = get_saad_nahs(day, month, year)
-
-    # 8. عدد سرنوشت
+    # 2. عدد سرنوشت
     life_path = sum(int(d) for d in f"{day}{month}{year}")
     while life_path > 9:
         life_path = sum(int(d) for d in str(life_path))
+
+    # 3. جفر ۳۶
+    j36 = jafar_36(question)
+
+    # 4. جفر ۳۶۰
+    j360 = jafar_360(question, name, mother)
+
+    # 5. رمل
+    raml8 = raml_extract(name, use_16=False)
+    raml16 = raml_extract(name, use_16=True)
+
+    # 6. همزاد
+    hamzad_names = hamzad_name(name)
+
+    # 7. تکسیر و بسط
+    taksir = taksir_correct(name + mother)
+    basts = basts_azizi(name, mother)
+
+    # 8. زایجه عدل
+    zayejah = zayejah_adl(question, day, hour)
+
+    # 9. اوقات سعد و نحس
+    saad_nahs = get_saad_nahs(day, month, year)
 
     return f"""
 📊 **نتیجه تحلیل کامل برای {name}**
@@ -395,12 +400,12 @@ def analyze_with_details(data):
 عدد سرنوشت: {life_path}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔮 **جفر ۳۶**
+🔮 **جفر ۳۶** (محاسبه: ابجد سوال / ۳۶)
 {j36['answer']}
 امتیاز: {j36['score']}/100
 توصیه: {j36['advice']}
 
-🔮 **جفر ۳۶۰**
+🔮 **جفر ۳۶۰** (محاسبه: ابجد سوال + ابجد نام + ابجد مادر / ۳۶۰)
 {j360['answer']}
 امتیاز: {j360['score']}/100
 درجه: {j360.get('degree', '---')}
@@ -415,12 +420,11 @@ def analyze_with_details(data):
 👹 **همزاد**
 اسم ملکی: {hamzad_names['malaki']}
 اسم جنی: {hamzad_names['jinni']}
-وضعیت: {hamzad['severity']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📖 **تکسیر و بسط**
-تکسیر: {taksir['zamam'] if taksir['zamam'] else '---'}
-بسط: {basts['malak']} - {basts['awn']}
+تکسیر (تجزیه): {taksir['zamam'] if taksir['zamam'] else '---'}
+بسط (ترکیب): {basts['malak']} - {basts['awn']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚗️ **زایجه عدل**
@@ -522,5 +526,6 @@ def webhook():
 # 🚀 اجرا
 # =========================
 if __name__ == "__main__":
+    set_commands()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

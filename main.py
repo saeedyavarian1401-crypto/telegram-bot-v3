@@ -78,7 +78,7 @@ def engine(results):
 
     for r in results:
         w = weights.get(r["name"], 0.05)
-        w = w * (0.5 + r["confidence"])  # وزن پویا
+        w = w * (0.5 + r["confidence"])
 
         total += r["score"] * w
         wsum += w
@@ -213,7 +213,6 @@ def webhook():
             send_message(chat_id, "💳 حالت تست: پرداخت فعال شد", pay_menu())
 
         elif data == "pay_50000":
-            # ⚠️ TEST MODE: همیشه اجازه ورود می‌دهد
             send_message(chat_id, "✅ پرداخت تستی موفق بود", bottom_menu())
 
     return "ok", 200

@@ -235,3 +235,20 @@ if __name__ == "__main__":
     set_commands()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+elif "callback_query" in update:
+    print("✅ callback_query دریافت شد")  # این خط رو اضافه کن
+    chat_id = update["callback_query"]["from"]["id"]
+    data = update["callback_query"]["data"]
+    print("📌 data:", data)  # این خط رو اضافه کن
+
+    if data == "pay":
+        send_message(
+            chat_id,
+            """
+✅ پرداخت با موفقیت انجام شد.
+
+به سامانه خوش آمدید.
+لطفاً یکی از گزینه‌های زیر را انتخاب کنید.
+""",
+            bottom_menu()
+        )

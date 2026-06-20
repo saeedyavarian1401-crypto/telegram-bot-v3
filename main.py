@@ -2,10 +2,12 @@ from flask import Flask, request
 import requests
 import json
 import os
+import re
 
 app = Flask(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+ADMIN_CHAT_ID = "226168396"  # آیدی عددی خودت
 
 # =========================
 # 📤 ارسال پیام
@@ -16,6 +18,69 @@ def send_message(chat_id, text, keyboard=None):
     if keyboard:
         payload["reply_markup"] = json.dumps(keyboard)
     requests.post(url, json=payload)
+
+# =========================
+# 📋 منوی شیشه‌ای
+# =========================
+def main_menu():
+    return {
+        "inline_keyboard": [
+            [{"text": "🔍 شروع تحلیل", "callback_data": "start_analysis"}],
+            [{"text": "💳 پرداخت (نمایشی)", "callback_data": "payment_demo"}],
+            [{"text": "📖 درباره سامانه", "callback_data": "about"}],
+            [{"text": "📂 تاریخچه تحلیل‌ها", "callback_data": "history"}],
+            [{"text": "📜 قوانین", "callback_data": "rules"}],
+            [{"text": "📩 تماس با ادمین", "callback_data": "contact_admin"}]
+        ]
+    }
+
+# =========================
+# 🧠 مدیریت اطلاعات کاربر
+# =========================
+user_data = {}
+
+def process_analysis(chat_id, text):
+    if chat_id not in user_data:
+        return
+
+    step = user_data[chat_id].get("step")
+
+    if step == "name":
+        user_data[chat_id]["name"] = text
+        user_data[chat_id]["step"] = "mother"
+        send_message(chat_id, "👩 لطفاً **نام مادر** خود را وارد کنید:")
+
+    elif step == "mother":
+        user_data[chat_id]["mother"] = text
+        user_data[chat_id]["step"] = "birthdate"
+        send_message(chat_id, "📅 لطفاً **تاریخ تولد** خود را وارد کنید (مثلاً ۱۵/۶/۱۳۷۵):")
+
+    elif step == "birthdate":
+        if re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', text):
+            day, month, year = text.split('/')
+            user_data[chat_id]["day"] = int(day)
+            user_data[chat_id]["month"] = int(month)
+            user_data[chat_id]["year"] = int(year)
+            user_data[chat_id]["step"] = "question"
+            send_message(chat_id, "❓ **سوال** خود را بپرسید:")
+        else:
+            send_message(chat_id, "❌ فرمت تاریخ اشتباه است. لطفاً به صورت **روز/ماه/سال** وارد کنید (مثلاً ۱۵/۶/۱۳۷۵):")
+
+    elif step == "question":
+        user_data[chat_id]["question"] = text
+        result = analyze(user_data[chat_id])
+        send_message(chat_id, f"""
+📊 نتیجه تحلیل
+
+👤 نام: {user_data[chat_id]['name']}
+👩 نام مادر: {user_data[chat_id]['mother']}
+📅 تاریخ تولد: {user_data[chat_id]['day']}/{user_data[chat_id]['month']}/{user_data[chat_id]['year']}
+❓ سوال: {user_data[chat_id]['question']}
+
+امتیاز نهایی: {result['final_score']}
+وضعیت: {result['status']}
+""")
+        del user_data[chat_id]
 
 # =========================
 # 🧠 فرمول‌ها
@@ -29,9 +94,6 @@ def bast(data):    return out("bast", 60, 0.75, "bast calc")
 def jafar(data):   return out("jafar", 70, 0.8, "jafar calc")
 def awfaq(data):   return out("awfaq", 65, 0.7, "awfaq calc")
 
-# =========================
-# ⚙️ موتور وزن‌دهی
-# =========================
 def engine(results):
     weights = {"abjad": 0.30, "taksir": 0.25, "bast": 0.20, "jafar": 0.15, "awfaq": 0.10}
     total = 0
@@ -50,20 +112,6 @@ def engine(results):
 def analyze(data):
     results = [abjad(data), taksir(data), bast(data), jafar(data), awfaq(data)]
     return engine(results)
-
-# =========================
-# 📋 منوها
-# =========================
-def main_menu():
-    return {
-        "keyboard": [
-            ["🔍 شروع تحلیل", "💳 پرداخت (نمایشی)"],
-            ["📖 درباره سامانه", "📂 تاریخچه تحلیل‌ها"],
-            ["📜 قوانین"]
-        ],
-        "resize_keyboard": True,
-        "one_time_keyboard": False
-    }
 
 # =========================
 # 🌐 روت‌ها
@@ -94,17 +142,21 @@ def webhook():
 """,
                 main_menu()
             )
+        else:
+            process_analysis(chat_id, text)
 
-        elif text == "🔍 شروع تحلیل":
-            send_message(chat_id, "🔍 لطفاً نام و نام مادر فرد مورد نظر را ارسال نمایید.")
+    elif "callback_query" in update:
+        chat_id = update["callback_query"]["from"]["id"]
+        data = update["callback_query"]["data"]
 
-        elif text == "💳 پرداخت (نمایشی)":
+        if data == "start_analysis":
+            user_data[chat_id] = {"step": "name"}
+            send_message(chat_id, "👤 لطفاً **نام** خود را وارد کنید:")
+
+        elif data == "payment_demo":
             send_message(chat_id, "💳 درگاه پرداخت به زودی فعال خواهد شد.")
 
-        elif text == "📂 تاریخچه تحلیل‌ها":
-            send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
-
-        elif text == "📖 درباره سامانه":
+        elif data == "about":
             send_message(
                 chat_id,
                 """
@@ -116,7 +168,10 @@ def webhook():
 """
             )
 
-        elif text == "📜 قوانین":
+        elif data == "history":
+            send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
+
+        elif data == "rules":
             send_message(
                 chat_id,
                 """
@@ -130,17 +185,15 @@ def webhook():
 """
             )
 
-        else:
-            data = {"input": text}
-            result = analyze(data)
+        elif data == "contact_admin":
+            # پیام به ادمین
+            send_message(
+                ADMIN_CHAT_ID,
+                f"📩 پیام جدید از کاربر {chat_id}\n\nدرخواست تماس با ادمین"
+            )
             send_message(
                 chat_id,
-                f"""
-📊 نتیجه تحلیل
-
-امتیاز نهایی: {result['final_score']}
-وضعیت: {result['status']}
-"""
+                "✅ پیام شما به ادمین ارسال شد. به زودی پاسخ داده می‌شود."
             )
 
     return "ok", 200

@@ -73,7 +73,6 @@ def awfaq(data):
 # ⚙️ موتور وزن‌دهی (Consensus Engine)
 # =========================
 def engine(results):
-
     weights = {
         "abjad": 0.30,
         "taksir": 0.25,
@@ -113,7 +112,6 @@ def engine(results):
 # 🧠 موتور تحلیل اصلی
 # =========================
 def analyze(data):
-
     results = [
         abjad(data),
         taksir(data),
@@ -128,20 +126,12 @@ def analyze(data):
 
 
 # =========================
-# 💳 منوها (سیستم پولی تستی)
+# 💳 منوها
 # =========================
 def start_menu():
     return {
         "inline_keyboard": [
             [{"text": "💳 پرداخت و شروع تحلیل", "callback_data": "pay"}]
-        ]
-    }
-
-
-def pay_menu():
-    return {
-        "inline_keyboard": [
-            [{"text": "💳 پرداخت 50,000 تومان (تست)", "callback_data": "pay_50000"}]
         ]
     }
 
@@ -166,34 +156,41 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     update = request.get_json()
     if not update:
         return "ok", 200
-
 
     # =========================
     # پیام‌ها
     # =========================
     if "message" in update:
-
         chat_id = update["message"]["chat"]["id"]
         text = update["message"].get("text", "")
 
         if text == "/start":
-            send_message(chat_id, "سلام 👋 به سامانه تحلیل خوش آمدید", start_menu())
+            send_message(
+                chat_id,
+                """
+📜 سامانه تخصصی تحلیل
+
+این سامانه بر پایه منابع معتبر، نسخه‌های خطی و متون تخصصی گردآوری شده است.
+
+جهت ورود به بخش تحلیل و بررسی اطلاعات، ادامه فرایند را انتخاب نمایید.
+""",
+                start_menu()
+            )
 
         elif text == "🔍 شروع تحلیل":
-            send_message(chat_id, "نام و نام مادر را ارسال کن")
+            send_message(chat_id, "🔍 لطفاً نام و نام مادر فرد مورد نظر را ارسال نمایید.")
 
         elif text == "📂 تاریخچه تحلیل‌ها":
-            send_message(chat_id, "فعلاً تاریخچه خالی است")
+            send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
 
         elif text == "📖 درباره سامانه":
-            send_message(chat_id, "سیستم تحلیل عددی و ساختاری")
+            send_message(chat_id, "📖 این سامانه برای تحلیل داده‌های عددی و متنی طراحی شده است.")
 
         elif text == "📜 قوانین":
-            send_message(chat_id, "استفاده مسئولیت کاربر است")
+            send_message(chat_id, "📜 استفاده از این سامانه به معنی پذیرش قوانین آن است.")
 
         else:
             data = {"input": text}
@@ -209,20 +206,24 @@ def webhook():
 """
             )
 
-
     # =========================
-    # پرداخت (TEST MODE = همیشه آزاد)
+    # پرداخت تستی
     # =========================
     elif "callback_query" in update:
-
         chat_id = update["callback_query"]["from"]["id"]
         data = update["callback_query"]["data"]
 
         if data == "pay":
-            send_message(chat_id, "💳 حالت تست: پرداخت فعال شد", pay_menu())
+            send_message(
+                chat_id,
+                """
+✅ پرداخت با موفقیت انجام شد.
 
-        elif data == "pay_50000":
-            send_message(chat_id, "✅ پرداخت تستی موفق بود", bottom_menu())
+به سامانه خوش آمدید.
+لطفاً یکی از گزینه‌های زیر را انتخاب کنید.
+""",
+                bottom_menu()
+            )
 
     return "ok", 200
 

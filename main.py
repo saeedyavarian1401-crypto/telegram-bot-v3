@@ -27,7 +27,6 @@ def set_commands():
     url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
     commands = [
         {"command": "start", "description": "🔄 شروع مجدد"},
-        {"command": "help", "description": "📖 راهنمای سامانه"},
         {"command": "analyze", "description": "🔍 شروع تحلیل جدید"},
         {"command": "history", "description": "📂 تاریخچه تحلیل‌ها"},
         {"command": "rules", "description": "📜 قوانین"},
@@ -35,6 +34,13 @@ def set_commands():
         {"command": "contact", "description": "📩 تماس با ادمین"}
     ]
     requests.post(url, json={"commands": commands})
+
+def cancel_keyboard():
+    return {
+        "keyboard": [["❌ لغو"]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
 
 # =========================
 # 🧠 مدیریت اطلاعات کاربر
@@ -324,38 +330,25 @@ def analyze_with_details(data):
     question = data.get('question', '')
     hour = datetime.now().hour
 
-    # 1. برج فلکی و عناصر
     zodiac = get_zodiac_info(day, month, year)
     planet = zodiac["planet"]
     element = zodiac["element"]
     mineral = get_mineral(planet)
 
-    # 2. عدد سرنوشت
     life_path = sum(int(d) for d in f"{day}{month}{year}")
     while life_path > 9:
         life_path = sum(int(d) for d in str(life_path))
 
-    # 3. جفر ۳۶
     j36 = jafar_36(question)
-
-    # 4. جفر ۳۶۰
     j360 = jafar_360(question, name, mother)
 
-    # 5. رمل
     raml8 = raml_extract(name, use_16=False)
     raml16 = raml_extract(name, use_16=True)
 
-    # 6. همزاد
     hamzad_names = hamzad_name(name)
-
-    # 7. تکسیر و بسط
     taksir = taksir_correct(name + mother)
     basts = basts_azizi(name, mother)
-
-    # 8. زایجه عدل
     zayejah = zayejah_adl(question, day, hour)
-
-    # 9. اوقات سعد و نحس
     saad_nahs = get_saad_nahs(day, month, year)
 
     return f"""
@@ -444,39 +437,17 @@ def webhook():
 این سامانه بر پایه منابع معتبر، نسخه‌های خطی و متون تخصصی گردآوری شده است.
 
 جهت ورود به بخش تحلیل و بررسی اطلاعات، ادامه فرایند را انتخاب نمایید.
-""",
-                main_menu()
-            )
-        else:
-            process_analysis(chat_id, text)
-
-    elif "callback_query" in update:
-        chat_id = update["callback_query"]["from"]["id"]
-        data = update["callback_query"]["data"]
-
-        if data == "start_analysis":
-            user_data[chat_id] = {"step": "name"}
-            send_message(chat_id, "👤 لطفاً **نام** خود را وارد کنید:")
-
-        elif data == "payment_demo":
-            send_message(chat_id, "💳 درگاه پرداخت به زودی فعال خواهد شد.")
-
-        elif data == "about":
-            send_message(
-                chat_id,
-                """
-📖 درباره سامانه
-
-این سامانه با هدف افزایش آگاهی کاربران و جلوگیری از هرگونه سوءاستفاده احتمالی توسط افراد سودجو و شیاد طراحی و راه‌اندازی شده است.
-
-هدف اصلی این مجموعه، فراهم کردن بستری برای ثبت، نگهداری و بررسی اطلاعات در محیطی منظم و یکپارچه است تا کاربران بتوانند با دسترسی آسان به سوابق و اطلاعات مورد نیاز خود، تصمیمات آگاهانه‌تری اتخاذ نمایند.
 """
             )
 
-        elif data == "history":
+        elif text == "/analyze":
+            user_data[chat_id] = {"step": "name"}
+            send_message(chat_id, "👤 لطفاً **نام** خود را وارد کنید:")
+
+        elif text == "/history":
             send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
 
-        elif data == "rules":
+        elif text == "/rules":
             send_message(
                 chat_id,
                 """
@@ -490,13 +461,28 @@ def webhook():
 """
             )
 
-        elif data == "contact_admin":
+        elif text == "/about":
+            send_message(
+                chat_id,
+                """
+📖 درباره سامانه
+
+این سامانه با هدف افزایش آگاهی کاربران و جلوگیری از هرگونه سوءاستفاده احتمالی توسط افراد سودجو و شیاد طراحی و راه‌اندازی شده است.
+
+هدف اصلی این مجموعه، فراهم کردن بستری برای ثبت، نگهداری و بررسی اطلاعات در محیطی منظم و یکپارچه است تا کاربران بتوانند با دسترسی آسان به سوابق و اطلاعات مورد نیاز خود، تصمیمات آگاهانه‌تری اتخاذ نمایند.
+"""
+            )
+
+        elif text == "/contact":
             user_data[chat_id] = {"step": "contact_message"}
             send_message(
                 chat_id,
                 "✏️ لطفاً **پیام خود** را برای ادمین بنویسید:",
                 cancel_keyboard()
             )
+
+        else:
+            process_analysis(chat_id, text)
 
     return "ok", 200
 

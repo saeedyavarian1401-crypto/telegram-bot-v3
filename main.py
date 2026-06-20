@@ -3,6 +3,7 @@ import requests
 import json
 import os
 import re
+import asyncio
 from datetime import datetime
 
 app = Flask(__name__)
@@ -14,6 +15,14 @@ ADMIN_CHAT_ID = "226168396"
 # 📤 ارسال پیام
 # =========================
 def send_message(chat_id, text, keyboard=None):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if keyboard:
+        payload["reply_markup"] = json.dumps(keyboard)
+    requests.post(url, json=payload)
+
+def send_message_async(chat_id, text, keyboard=None):
+    """نسخه async برای استفاده در تابع analyze"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if keyboard:
@@ -76,8 +85,8 @@ def process_analysis(chat_id, text):
 
     elif step == "question":
         user_data[chat_id]["question"] = text
-        result = analyze_with_details(user_data[chat_id])
-        send_message(chat_id, result)
+        # اجرای تحلیل به صورت async
+        asyncio.run(run_analysis_async(chat_id, user_data[chat_id]))
         del user_data[chat_id]
 
     elif step == "contact_message":
@@ -165,32 +174,25 @@ def get_mineral(planet):
 def jafar_36(question):
     total = abjad_sum(question)
     remainder = total % 36
-    if remainder == 0:
-        return {"answer": "✅ بله - قطعاً انجام می‌شود", "score": 95, "advice": "با اطمینان کامل اقدام کنید", "remainder": remainder}
-    elif remainder <= 9:
-        return {"answer": "✅ بله - با احتمال زیاد", "score": 85, "advice": "مانعی نیست، اقدام کن", "remainder": remainder}
-    elif remainder <= 18:
-        return {"answer": "⚠️ بله - با احتیاط", "score": 65, "advice": "صدقه بدهید و توکل کنید", "remainder": remainder}
-    elif remainder <= 27:
-        return {"answer": "❓ شاید - مصلحت نیست", "score": 50, "advice": "چند روز صبر کنید", "remainder": remainder}
-    else:
-        return {"answer": "❌ خیر - مشکل دارد", "score": 30, "advice": "بهتر است منصرف شوید", "remainder": remainder}
+    return {
+        "total": total,
+        "remainder": remainder,
+        "answer": "✅ بله - با احتمال زیاد" if remainder <= 9 else "❌ خیر - مشکل دارد" if remainder > 27 else "⚠️ بله - با احتیاط" if remainder <= 18 else "❓ شاید - مصلحت نیست",
+        "score": 85 if remainder <= 9 else 30 if remainder > 27 else 65 if remainder <= 18 else 50,
+        "advice": "مانعی نیست، اقدام کن" if remainder <= 9 else "بهتر است منصرف شوید" if remainder > 27 else "صدقه بدهید و توکل کنید" if remainder <= 18 else "چند روز صبر کنید"
+    }
 
 def jafar_360(question, name, mother):
     total = abjad_sum(question) + abjad_sum(name) + abjad_sum(mother)
     remainder = total % 360
-    if remainder < 30:
-        return {"answer": "✅ بله قطعی - گشایش بزرگ", "score": 98, "advice": "بدون تردید اقدام کن", "degree": "عالی", "remainder": remainder}
-    elif remainder < 90:
-        return {"answer": "✅ بله - موفقیت", "score": 85, "advice": "زمان مناسبه، اقدام کن", "degree": "خوب", "remainder": remainder}
-    elif remainder < 150:
-        return {"answer": "⚠️ احتمالاً - با تلاش", "score": 65, "advice": "تلاش بیشتری کن", "degree": "متوسط", "remainder": remainder}
-    elif remainder < 210:
-        return {"answer": "❓ شاید - صبر کن", "score": 50, "advice": "فعلاً صبر کن", "degree": "متوسط", "remainder": remainder}
-    elif remainder < 270:
-        return {"answer": "❌ خیر - مانع داره", "score": 35, "advice": "بهتره منصرف شی", "degree": "ضعیف", "remainder": remainder}
-    else:
-        return {"answer": "❌ خیر قطعی - مشکل داره", "score": 20, "advice": "اصلاً مناسب نیست", "degree": "خیلی ضعیف", "remainder": remainder}
+    return {
+        "total": total,
+        "remainder": remainder,
+        "answer": "✅ بله قطعی - گشایش بزرگ" if remainder < 30 else "✅ بله - موفقیت" if remainder < 90 else "⚠️ احتمالاً - با تلاش" if remainder < 150 else "❓ شاید - صبر کن" if remainder < 210 else "❌ خیر - مانع داره" if remainder < 270 else "❌ خیر قطعی - مشکل داره",
+        "score": 98 if remainder < 30 else 85 if remainder < 90 else 65 if remainder < 150 else 50 if remainder < 210 else 35 if remainder < 270 else 20,
+        "degree": "عالی" if remainder < 30 else "خوب" if remainder < 90 else "متوسط" if remainder < 150 else "متوسط" if remainder < 210 else "ضعیف" if remainder < 270 else "خیلی ضعیف",
+        "advice": "بدون تردید اقدام کن" if remainder < 30 else "زمان مناسبه، اقدام کن" if remainder < 90 else "تلاش بیشتری کن" if remainder < 150 else "فعلاً صبر کن" if remainder < 210 else "بهتره منصرف شی" if remainder < 270 else "اصلاً مناسب نیست"
+    }
 
 # =========================
 # رمل ۸ و ۱۶ شکل
@@ -319,9 +321,9 @@ def basts_azizi(name, mother):
     return {"malak": malak, "awn": awn, "total_abjad": total_abjad}
 
 # =========================
-# 🧠 تحلیل کامل با نمایش مراحل
+# 🧠 تحلیل کامل با نمایش مراحل محاسبه (با فاصله ۵ ثانیه)
 # =========================
-def analyze_with_details(data):
+async def run_analysis_async(chat_id, data):
     name = data.get('name', '')
     mother = data.get('mother', '')
     day = data.get('day', 1)
@@ -330,6 +332,7 @@ def analyze_with_details(data):
     question = data.get('question', '')
     hour = datetime.now().hour
 
+    # 1️⃣ برج فلکی و عناصر
     zodiac = get_zodiac_info(day, month, year)
     planet = zodiac["planet"]
     element = zodiac["element"]
@@ -339,77 +342,137 @@ def analyze_with_details(data):
     while life_path > 9:
         life_path = sum(int(d) for d in str(life_path))
 
-    j36 = jafar_36(question)
-    j360 = jafar_360(question, name, mother)
+    # نمایش برج فلکی
+    msg = f"""
+📊 **مرحله ۱: برج فلکی و عناصر**
 
+📅 تاریخ تولد: {day}/{month}/{year}
+🔢 عدد سرنوشت: {life_path}
+
+🌟 برج: {zodiac['name']}
+🌍 عنصر: {element}
+🪐 سیاره: {planet}
+💎 سنگ: {zodiac['stone']}
+⚗️ فلز: {mineral['metal']}
+🌿 گیاه: {mineral['plant']}
+🎨 رنگ: {mineral['color']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 2️⃣ جفر ۳۶
+    j36 = jafar_36(question)
+    msg = f"""
+📊 **مرحله ۲: جفر ۳۶**
+
+📜 سوال: {question}
+🧮 محاسبه: ابجد سوال = {j36['total']}
+🔢 باقیمانده: {j36['total']} % 36 = {j36['remainder']}
+
+{j36['answer']}
+⭐ امتیاز: {j36['score']}/100
+💡 توصیه: {j36['advice']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 3️⃣ جفر ۳۶۰
+    j360 = jafar_360(question, name, mother)
+    msg = f"""
+📊 **مرحله ۳: جفر ۳۶۰**
+
+📜 سوال: {question}
+👤 نام: {name}
+👩 نام مادر: {mother}
+🧮 محاسبه: ابجد سوال + ابجد نام + ابجد مادر = {j360['total']}
+🔢 باقیمانده: {j360['total']} % 360 = {j360['remainder']}
+
+{j360['answer']}
+⭐ امتیاز: {j360['score']}/100
+📊 درجه: {j360['degree']}
+💡 توصیه: {j360['advice']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 4️⃣ رمل ۸ و ۱۶
     raml8 = raml_extract(name, use_16=False)
     raml16 = raml_extract(name, use_16=True)
+    msg = f"""
+📊 **مرحله ۴: رمل**
 
+👤 نام: {name}
+🧮 محاسبه: ابجد نام = {abjad_sum(name)}
+
+🎲 رمل ۸: {raml8['sign']} → {raml8['meaning']}
+🎲 رمل ۱۶: {raml16['sign']} → {raml16['meaning']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 5️⃣ همزاد
     hamzad_names = hamzad_name(name)
+    msg = f"""
+📊 **مرحله ۵: همزاد**
+
+👤 نام: {name}
+🧮 محاسبه: ابجد نام = {abjad_sum(name)}
+
+👹 اسم ملکی: {hamzad_names['malaki']}
+👹 اسم جنی: {hamzad_names['jinni']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 6️⃣ تکسیر و بسط
     taksir = taksir_correct(name + mother)
     basts = basts_azizi(name, mother)
-    zayejah = zayejah_adl(question, day, hour)
-    saad_nahs = get_saad_nahs(day, month, year)
-
-    return f"""
-📊 **نتیجه تحلیل کامل برای {name}**
+    msg = f"""
+📊 **مرحله ۶: تکسیر و بسط**
 
 👤 نام: {name}
 👩 نام مادر: {mother}
-📅 تاریخ تولد: {day}/{month}/{year}
-❓ سوال: {question}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌟 **برج فلکی و عناصر**
-برج: {zodiac['name']}
-عنصر: {element}
-سیاره: {planet}
-سنگ: {zodiac['stone']}
-فلز: {mineral['metal']}
-گیاه: {mineral['plant']}
-رنگ: {mineral['color']}
-عدد سرنوشت: {life_path}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔮 **جفر ۳۶** (محاسبه: ابجد سوال / ۳۶)
-{j36['answer']}
-امتیاز: {j36['score']}/100
-توصیه: {j36['advice']}
-
-🔮 **جفر ۳۶۰** (محاسبه: ابجد سوال + ابجد نام + ابجد مادر / ۳۶۰)
-{j360['answer']}
-امتیاز: {j360['score']}/100
-درجه: {j360.get('degree', '---')}
-توصیه: {j360['advice']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎲 **رمل**
-رمل ۸: {raml8['sign']} - {raml8['meaning']}
-رمل ۱۶: {raml16['sign']} - {raml16['meaning']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👹 **همزاد**
-اسم ملکی: {hamzad_names['malaki']}
-اسم جنی: {hamzad_names['jinni']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📖 **تکسیر و بسط**
-تکسیر (تجزیه): {taksir['zamam'] if taksir['zamam'] else '---'}
-بسط (ترکیب): {basts['malak']} - {basts['awn']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚗️ **زایجه عدل**
-طبع: {zayejah['tab']}
-تعبیر: {zayejah['text']}
-
-⏰ **اوقات سعد و نحس**
-وضعیت: {saad_nahs['status']}
-روز قمری: {saad_nahs['lunar_day']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 **توصیه نهایی**
-{j36['advice']}
+📖 تکسیر (تجزیه): {taksir['zamam'] if taksir['zamam'] else '---'}
+📖 بسط (ترکیب): {basts['malak']} - {basts['awn']}
 """
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 7️⃣ زایجه عدل
+    zayejah = zayejah_adl(question, day, hour)
+    msg = f"""
+📊 **مرحله ۷: زایجه عدل**
+
+❓ سوال: {question}
+🕐 ساعت: {hour}
+⚗️ طبع: {zayejah['tab']}
+💬 تعبیر: {zayejah['text']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 8️⃣ اوقات سعد و نحس
+    saad_nahs = get_saad_nahs(day, month, year)
+    msg = f"""
+📊 **مرحله ۸: اوقات سعد و نحس**
+
+📅 روز قمری: {saad_nahs['lunar_day']}
+⏰ وضعیت: {saad_nahs['status']}
+"""
+    send_message_async(chat_id, msg)
+    await asyncio.sleep(5)
+
+    # 9️⃣ توصیه نهایی
+    msg = f"""
+📊 **توصیه نهایی**
+
+💡 {j36['advice']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ تحلیل کامل شد!
+"""
+    send_message_async(chat_id, msg)
 
 # =========================
 # 🌐 روت‌ها

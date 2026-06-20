@@ -7,16 +7,6 @@ app = Flask(__name__)
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-
-def set_commands():
-    url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
-    commands = [
-        {"command": "start", "description": "شروع و مشاهده منو"},
-        {"command": "help", "description": "راهنمای سامانه"}
-    ]
-    requests.post(url, json={"commands": commands})
-
-
 # =========================
 # 📤 ارسال پیام
 # =========================
@@ -25,7 +15,8 @@ def send_message(chat_id, text, keyboard=None):
 
     payload = {
         "chat_id": chat_id,
-        "text": text
+        "text": text,
+        "parse_mode": "HTML"
     }
 
     if keyboard:
@@ -47,7 +38,7 @@ def out(name, score, confidence=0.8, details=""):
 
 
 # =========================
-# 🧮 فرمول‌ها (طبق اجماع)
+# 🧮 فرمول‌ها
 # =========================
 def abjad(data):
     return out("abjad", 72, 0.85, "abjad calc")
@@ -70,9 +61,10 @@ def awfaq(data):
 
 
 # =========================
-# ⚙️ موتور وزن‌دهی (Consensus Engine)
+# ⚙️ موتور وزن‌دهی
 # =========================
 def engine(results):
+
     weights = {
         "abjad": 0.30,
         "taksir": 0.25,
@@ -109,9 +101,10 @@ def engine(results):
 
 
 # =========================
-# 🧠 موتور تحلیل اصلی
+# 🧠 تحلیل اصلی
 # =========================
 def analyze(data):
+
     results = [
         abjad(data),
         taksir(data),
@@ -126,7 +119,7 @@ def analyze(data):
 
 
 # =========================
-# 💳 منوها
+# 📋 منوها (با آیکون‌های درست)
 # =========================
 def start_menu():
     return {
@@ -142,7 +135,8 @@ def bottom_menu():
             ["🔍 شروع تحلیل", "📂 تاریخچه تحلیل‌ها"],
             ["📖 درباره سامانه", "📜 قوانین"]
         ],
-        "resize_keyboard": True
+        "resize_keyboard": True,
+        "one_time_keyboard": False
     }
 
 
@@ -156,18 +150,22 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
     update = request.get_json()
     if not update:
         return "ok", 200
 
+
     # =========================
-    # پیام‌ها
+    # پیام‌های کاربر
     # =========================
     if "message" in update:
+
         chat_id = update["message"]["chat"]["id"]
         text = update["message"].get("text", "")
 
         if text == "/start":
+
             send_message(
                 chat_id,
                 """
@@ -181,18 +179,45 @@ def webhook():
             )
 
         elif text == "🔍 شروع تحلیل":
-            send_message(chat_id, "🔍 لطفاً نام و نام مادر فرد مورد نظر را ارسال نمایید.")
+
+            send_message(
+                chat_id,
+                "🔍 لطفاً نام و نام مادر فرد مورد نظر را ارسال نمایید."
+            )
 
         elif text == "📂 تاریخچه تحلیل‌ها":
-            send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
+
+            send_message(
+                chat_id,
+                "📂 هنوز تحلیلی ثبت نشده است."
+            )
 
         elif text == "📖 درباره سامانه":
-            send_message(chat_id, "📖 این سامانه برای تحلیل داده‌های عددی و متنی طراحی شده است.")
+
+            send_message(
+                chat_id,
+                """
+📖 درباره سامانه
+
+این سامانه با هدف افزایش آگاهی کاربران و جلوگیری از هرگونه سوءاستفاده احتمالی توسط افراد سودجو و شیاد طراحی و راه‌اندازی شده است.
+
+هدف اصلی این مجموعه، فراهم کردن بستری برای ثبت، نگهداری و بررسی اطلاعات در محیطی منظم و یکپارچه است تا کاربران بتوانند با دسترسی آسان به سوابق و اطلاعات مورد نیاز خود، تصمیمات آگاهانه‌تری اتخاذ نمایند.
+"""
+            )
 
         elif text == "📜 قوانین":
-            send_message(chat_id, "📜 استفاده از این سامانه به معنی پذیرش قوانین آن است.")
+
+            send_message(
+                chat_id,
+                """
+📜 قوانین استفاده
+
+استفاده از سامانه به منزله پذیرش شرایط و قوانین آن است.
+"""
+            )
 
         else:
+
             data = {"input": text}
             result = analyze(data)
 
@@ -206,14 +231,17 @@ def webhook():
 """
             )
 
+
     # =========================
-    # پرداخت تستی
+    # دکمه‌های شیشه‌ای (پرداخت)
     # =========================
     elif "callback_query" in update:
+
         chat_id = update["callback_query"]["from"]["id"]
         data = update["callback_query"]["data"]
 
         if data == "pay":
+
             send_message(
                 chat_id,
                 """
@@ -232,23 +260,10 @@ def webhook():
 # 🚀 اجرا
 # =========================
 if __name__ == "__main__":
-    set_commands()
+
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-elif "callback_query" in update:
-    print("✅ callback_query دریافت شد")  # این خط رو اضافه کن
-    chat_id = update["callback_query"]["from"]["id"]
-    data = update["callback_query"]["data"]
-    print("📌 data:", data)  # این خط رو اضافه کن
 
-    if data == "pay":
-        send_message(
-            chat_id,
-            """
-✅ پرداخت با موفقیت انجام شد.
-
-به سامانه خوش آمدید.
-لطفاً یکی از گزینه‌های زیر را انتخاب کنید.
-""",
-            bottom_menu()
-        )
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )

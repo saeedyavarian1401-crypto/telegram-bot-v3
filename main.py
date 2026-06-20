@@ -8,6 +8,15 @@ app = Flask(__name__)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 
+def set_commands():
+    url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
+    commands = [
+        {"command": "start", "description": "شروع و مشاهده منو"},
+        {"command": "help", "description": "راهنمای سامانه"}
+    ]
+    requests.post(url, json={"commands": commands})
+
+
 # =========================
 # 📤 ارسال پیام
 # =========================
@@ -222,5 +231,6 @@ def webhook():
 # 🚀 اجرا
 # =========================
 if __name__ == "__main__":
+    set_commands()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

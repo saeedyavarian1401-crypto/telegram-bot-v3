@@ -26,19 +26,19 @@ def send_message(chat_id, text, keyboard=None):
 
 
 # =========================
-# 🧠 فرمول استاندارد خروجی
+# 🧠 قرارداد استاندارد فرمول‌ها
 # =========================
 def out(name, score, confidence=0.8, details=""):
     return {
         "name": name,
         "score": float(score),
-        "confidence": confidence,
+        "confidence": float(confidence),
         "details": details
     }
 
 
 # =========================
-# 🧮 فرمول‌ها
+# 🧮 فرمول‌ها (طبق اجماع)
 # =========================
 def abjad(data):
     return out("abjad", 72, 0.85, "abjad calc")
@@ -61,7 +61,7 @@ def awfaq(data):
 
 
 # =========================
-# ⚙️ موتور وزن‌دهی
+# ⚙️ موتور وزن‌دهی (Consensus Engine)
 # =========================
 def engine(results):
 
@@ -78,28 +78,30 @@ def engine(results):
 
     for r in results:
         w = weights.get(r["name"], 0.05)
-        w = w * (0.5 + r["confidence"])
+        w = w * (0.5 + r["confidence"])  # وزن پویا
 
         total += r["score"] * w
         wsum += w
 
-    score = total / wsum if wsum else 0
+    final_score = total / wsum if wsum else 0
 
-    if score >= 80:
+    if final_score >= 80:
         status = "خیلی قوی"
-    elif score >= 60:
+    elif final_score >= 60:
         status = "قوی"
-    else:
+    elif final_score >= 40:
         status = "متوسط"
+    else:
+        status = "ضعیف"
 
     return {
-        "score": round(score, 2),
+        "final_score": round(final_score, 2),
         "status": status
     }
 
 
 # =========================
-# 🧠 تحلیل اصلی
+# 🧠 موتور تحلیل اصلی
 # =========================
 def analyze(data):
 
@@ -117,12 +119,12 @@ def analyze(data):
 
 
 # =========================
-# 💳 منوها
+# 💳 منوها (سیستم پولی تستی)
 # =========================
 def start_menu():
     return {
         "inline_keyboard": [
-            [{"text": "💳 پرداخت و شروع", "callback_data": "pay"}]
+            [{"text": "💳 پرداخت و شروع تحلیل", "callback_data": "pay"}]
         ]
     }
 
@@ -130,7 +132,7 @@ def start_menu():
 def pay_menu():
     return {
         "inline_keyboard": [
-            [{"text": "💳 پرداخت 50,000", "callback_data": "pay_50000"}]
+            [{"text": "💳 پرداخت 50,000 تومان (تست)", "callback_data": "pay_50000"}]
         ]
     }
 
@@ -138,7 +140,7 @@ def pay_menu():
 def bottom_menu():
     return {
         "keyboard": [
-            ["🔍 شروع تحلیل", "📂 تاریخچه"],
+            ["🔍 شروع تحلیل", "📂 تاریخچه تحلیل‌ها"],
             ["📖 درباره سامانه", "📜 قوانین"]
         ],
         "resize_keyboard": True
@@ -146,7 +148,7 @@ def bottom_menu():
 
 
 # =========================
-# 🌐 Routes
+# 🌐 روت‌ها
 # =========================
 @app.route("/")
 def home():
@@ -162,7 +164,7 @@ def webhook():
 
 
     # =========================
-    # پیام کاربر
+    # پیام‌ها
     # =========================
     if "message" in update:
 
@@ -170,19 +172,19 @@ def webhook():
         text = update["message"].get("text", "")
 
         if text == "/start":
-            send_message(chat_id, "سلام 👋", start_menu())
+            send_message(chat_id, "سلام 👋 به سامانه تحلیل خوش آمدید", start_menu())
 
         elif text == "🔍 شروع تحلیل":
-            send_message(chat_id, "نام و نام مادر را بفرست")
+            send_message(chat_id, "نام و نام مادر را ارسال کن")
+
+        elif text == "📂 تاریخچه تحلیل‌ها":
+            send_message(chat_id, "فعلاً تاریخچه خالی است")
 
         elif text == "📖 درباره سامانه":
-            send_message(chat_id, "سیستم تحلیل عددی")
+            send_message(chat_id, "سیستم تحلیل عددی و ساختاری")
 
         elif text == "📜 قوانین":
-            send_message(chat_id, "استفاده مسئولیت شماست")
-
-        elif text == "📂 تاریخچه":
-            send_message(chat_id, "هنوز داده‌ای ثبت نشده")
+            send_message(chat_id, "استفاده مسئولیت کاربر است")
 
         else:
             data = {"input": text}
@@ -193,14 +195,14 @@ def webhook():
                 f"""
 📊 نتیجه تحلیل
 
-امتیاز: {result['score']}
+امتیاز نهایی: {result['final_score']}
 وضعیت: {result['status']}
 """
             )
 
 
     # =========================
-    # دکمه‌های پرداخت
+    # پرداخت (TEST MODE = همیشه آزاد)
     # =========================
     elif "callback_query" in update:
 
@@ -208,16 +210,17 @@ def webhook():
         data = update["callback_query"]["data"]
 
         if data == "pay":
-            send_message(chat_id, "💳 پرداخت 50,000", pay_menu())
+            send_message(chat_id, "💳 حالت تست: پرداخت فعال شد", pay_menu())
 
         elif data == "pay_50000":
-            send_message(chat_id, "✅ پرداخت موفق", bottom_menu())
+            # ⚠️ TEST MODE: همیشه اجازه ورود می‌دهد
+            send_message(chat_id, "✅ پرداخت تستی موفق بود", bottom_menu())
 
     return "ok", 200
 
 
 # =========================
-# 🚀 Run
+# 🚀 اجرا
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

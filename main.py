@@ -1,558 +1,577 @@
-from flask import Flask, request
+# ==================== imports ====================
+from flask import Flask, request, jsonify
 import requests
-import json
-import os
-import re
-import asyncio
 from datetime import datetime
+import json
+import logging
+import os
+import sqlite3
+from contextlib import contextmanager
+import time
+from typing import Dict, Optional, List
+import base64
+from io import BytesIO
 
+# ==================== تنظیمات اولیه ====================
 app = Flask(__name__)
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-ADMIN_CHAT_ID = "226168396"
-
-# =========================
-# 📤 ارسال پیام
-# =========================
-def send_message(chat_id, text, keyboard=None):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    if keyboard:
-        payload["reply_markup"] = json.dumps(keyboard)
-    requests.post(url, json=payload)
-
-def send_message_async(chat_id, text, keyboard=None):
-    """نسخه async برای استفاده در تابع analyze"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    if keyboard:
-        payload["reply_markup"] = json.dumps(keyboard)
-    requests.post(url, json=payload)
-
-# =========================
-# 📋 منوی آبی (Command Menu)
-# =========================
-def set_commands():
-    url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
-    commands = [
-        {"command": "start", "description": "🔄 شروع مجدد"},
-        {"command": "analyze", "description": "🔍 شروع تحلیل جدید"},
-        {"command": "history", "description": "📂 تاریخچه تحلیل‌ها"},
-        {"command": "rules", "description": "📜 قوانین"},
-        {"command": "about", "description": "📖 درباره سامانه"},
-        {"command": "contact", "description": "📩 تماس با ادمین"}
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.StreamHandler()
     ]
-    requests.post(url, json={"commands": commands})
+)
+logger = logging.getLogger(__name__)
 
-def cancel_keyboard():
-    return {
-        "keyboard": [["❌ لغو"]],
-        "resize_keyboard": True,
-        "one_time_keyboard": True
-    }
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8624726972:AAHa89X4pWrLaD7c-GI3OUjmx7FuSL-5pQQ')
+FAL_API_KEY = os.environ.get('FAL_API_KEY', '')
 
-# =========================
-# 🧠 مدیریت اطلاعات کاربر
-# =========================
-user_data = {}
-
-def process_analysis(chat_id, text):
-    if chat_id not in user_data:
-        return
-
-    step = user_data[chat_id].get("step")
-
-    if step == "name":
-        user_data[chat_id]["name"] = text
-        user_data[chat_id]["step"] = "mother"
-        send_message(chat_id, "👩 لطفاً **نام مادر** خود را وارد کنید:")
-
-    elif step == "mother":
-        user_data[chat_id]["mother"] = text
-        user_data[chat_id]["step"] = "birthdate"
-        send_message(chat_id, "📅 لطفاً **تاریخ تولد** خود را وارد کنید (مثلاً ۱۵/۶/۱۳۷۵):")
-
-    elif step == "birthdate":
-        if re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', text):
-            day, month, year = text.split('/')
-            user_data[chat_id]["day"] = int(day)
-            user_data[chat_id]["month"] = int(month)
-            user_data[chat_id]["year"] = int(year)
-            user_data[chat_id]["step"] = "question"
-            send_message(chat_id, "❓ **سوال** خود را بپرسید:")
-        else:
-            send_message(chat_id, "❌ فرمت تاریخ اشتباه است. لطفاً به صورت **روز/ماه/سال** وارد کنید (مثلاً ۱۵/۶/۱۳۷۵):")
-
-    elif step == "question":
-        user_data[chat_id]["question"] = text
-        # اجرای تحلیل به صورت async
-        asyncio.run(run_analysis_async(chat_id, user_data[chat_id]))
-        del user_data[chat_id]
-
-    elif step == "contact_message":
-        send_message(
-            ADMIN_CHAT_ID,
-            f"📩 پیام جدید از کاربر {chat_id}:\n\n{text}"
-        )
-        send_message(
-            chat_id,
-            "✅ پیام شما به ادمین ارسال شد. به زودی پاسخ داده می‌شود."
-        )
-        del user_data[chat_id]
-
-# =========================
-# 🧮 فرهنگ ابجد
-# =========================
-ABJAD = {
-    'ا':1, 'ب':2, 'ج':3, 'د':4, 'ه':5, 'و':6, 'ز':7, 'ح':8, 'ط':9, 'ی':10,
-    'ک':20, 'ل':30, 'م':40, 'ن':50, 'س':60, 'ع':70, 'ف':80, 'ص':90, 'ق':100,
-    'ر':200, 'ش':300, 'ت':400, 'ث':500, 'خ':600, 'ذ':700, 'ض':800, 'ظ':900, 'غ':1000,
-    'پ':2, 'چ':3, 'ژ':7, 'گ':20, 'آ':1, 'أ':1, 'إ':1, 'ة':5, 'ى':10, 'ئ':10, 'ؤ':6
-}
-
-def abjad_sum(word):
-    if not word:
-        return 0
-    return sum(ABJAD.get(ch, 1) for ch in word)
-
-# =========================
-# برج فلکی و عناصر
-# =========================
-ZODIAC = [
-    {"name": "حمل", "element": "آتشی", "planet": "مریخ", "stone": "یاقوت سرخ", "start": (21, 3), "end": (19, 4)},
-    {"name": "ثور", "element": "خاکی", "planet": "زهره", "stone": "زمرد", "start": (20, 4), "end": (20, 5)},
-    {"name": "جوزا", "element": "بادی", "planet": "عطارد", "stone": "عقیق", "start": (21, 5), "end": (20, 6)},
-    {"name": "سرطان", "element": "آبی", "planet": "ماه", "stone": "مروارید", "start": (21, 6), "end": (22, 7)},
-    {"name": "اسد", "element": "آتشی", "planet": "خورشید", "stone": "یاقوت زرد", "start": (23, 7), "end": (22, 8)},
-    {"name": "سنبله", "element": "خاکی", "planet": "عطارد", "stone": "زبرجد", "start": (23, 8), "end": (22, 9)},
-    {"name": "میزان", "element": "بادی", "planet": "زهره", "stone": "عقیق", "start": (23, 9), "end": (22, 10)},
-    {"name": "عقرب", "element": "آبی", "planet": "مریخ", "stone": "یاقوت کبود", "start": (23, 10), "end": (21, 11)},
-    {"name": "قوس", "element": "آتشی", "planet": "مشتری", "stone": "فیروزه", "start": (22, 11), "end": (21, 12)},
-    {"name": "جدی", "element": "خاکی", "planet": "زحل", "stone": "یشم", "start": (22, 12), "end": (19, 1)},
-    {"name": "دلو", "element": "بادی", "planet": "زحل", "stone": "لاجورد", "start": (20, 1), "end": (18, 2)},
-    {"name": "حوت", "element": "آبی", "planet": "مشتری", "stone": "سنگ ماه", "start": (19, 2), "end": (20, 3)}
-]
-
-def get_zodiac_info(day, month, year):
-    try:
-        import jdatetime
-        greg = jdatetime.date(year, month, day).togregorian()
-        g_month, g_day = greg.month, greg.day
-    except:
-        g_month, g_day = month, day
+# ==================== دیتابیس ====================
+class Database:
+    def __init__(self, db_path='flux_bot.db'):
+        self.db_path = db_path
+        self.init_db()
     
-    for z in ZODIAC:
-        s_day, s_month = z["start"]
-        e_day, e_month = z["end"]
-        if s_month > e_month:
-            if (g_month == s_month and g_day >= s_day) or (g_month == e_month and g_day <= e_day):
-                return z
+    @contextmanager
+    def get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+    
+    def init_db(self):
+        with self.get_connection() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    chat_id TEXT PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    total_images INTEGER DEFAULT 0
+                )
+            ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS image_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id TEXT,
+                    prompt TEXT,
+                    image_url TEXT,
+                    model TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
+            logger.info("✅ دیتابیس راه‌اندازی شد")
+    
+    def get_user(self, chat_id: str) -> Optional[Dict]:
+        with self.get_connection() as conn:
+            result = conn.execute('SELECT * FROM users WHERE chat_id = ?', (chat_id,)).fetchone()
+            return dict(result) if result else None
+    
+    def create_user(self, chat_id: str, username: str = '', first_name: str = '', last_name: str = ''):
+        with self.get_connection() as conn:
+            conn.execute(
+                'INSERT OR REPLACE INTO users (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
+                (chat_id, username, first_name, last_name)
+            )
+            conn.commit()
+    
+    def increment_images(self, chat_id: str):
+        with self.get_connection() as conn:
+            conn.execute('UPDATE users SET total_images = total_images + 1 WHERE chat_id = ?', (chat_id,))
+            conn.commit()
+    
+    def save_image(self, chat_id: str, prompt: str, image_url: str, model: str = "flux-pro"):
+        with self.get_connection() as conn:
+            conn.execute(
+                '''INSERT INTO image_history (chat_id, prompt, image_url, model) VALUES (?, ?, ?, ?)''',
+                (chat_id, prompt, image_url, model)
+            )
+            conn.commit()
+    
+    def get_history(self, chat_id: str, limit: int = 5):
+        with self.get_connection() as conn:
+            results = conn.execute(
+                '''SELECT prompt, image_url, model, created_at FROM image_history 
+                   WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?''',
+                (chat_id, limit)
+            ).fetchall()
+            return [dict(row) for row in results]
+
+db = Database()
+
+# ==================== FLUX API ====================
+class FluxAPI:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://fal.run"
+    
+    def generate_image(self, prompt: str, model: str = "flux-pro", 
+                       width: int = 1024, height: int = 1024, 
+                       num_images: int = 1) -> Optional[str]:
+        """تولید تصویر با FLUX"""
+        if not self.api_key:
+            return None
+        
+        try:
+            headers = {
+                "Authorization": f"Key {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # مدل‌های مختلف FLUX
+            models = {
+                "flux-pro": "fal-ai/flux-pro/v1.1",
+                "flux-dev": "fal-ai/flux-dev",
+                "flux-schnell": "fal-ai/flux-schnell"
+            }
+            
+            url = f"{self.base_url}/{models.get(model, models['flux-pro'])}"
+            
+            payload = {
+                "prompt": prompt,
+                "image_size": {
+                    "width": width,
+                    "height": height
+                },
+                "num_images": num_images,
+                "guidance_scale": 3.5,
+                "num_inference_steps": 28,
+                "output_format": "png"
+            }
+            
+            # برای ویرایش تصویر (Kontext)
+            if model == "flux-kontext":
+                url = f"{self.base_url}/fal-ai/flux-kontext"
+                payload["prompt"] = prompt
+                payload["image_url"] = None  # برای ویرایش باید تصویر هم بفرستی
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            
+            if response.status_code == 200:
+                data = response.json()
+                images = data.get("images", [])
+                if images:
+                    return images[0].get("url")
+            else:
+                logger.error(f"خطا در FLUX: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"خطا در اتصال به FLUX: {e}")
+            return None
+    
+    def edit_image(self, image_url: str, prompt: str) -> Optional[str]:
+        """ویرایش تصویر با FLUX Kontext"""
+        if not self.api_key:
+            return None
+        
+        try:
+            headers = {
+                "Authorization": f"Key {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            url = f"{self.base_url}/fal-ai/flux-kontext"
+            
+            payload = {
+                "prompt": prompt,
+                "image_url": image_url,
+                "guidance_scale": 3.5,
+                "num_inference_steps": 28,
+                "output_format": "png"
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            
+            if response.status_code == 200:
+                data = response.json()
+                images = data.get("images", [])
+                if images:
+                    return images[0].get("url")
+            else:
+                logger.error(f"خطا در ویرایش: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"خطا در اتصال به FLUX Kontext: {e}")
+            return None
+
+flux = FluxAPI(FAL_API_KEY)
+
+# ==================== کیبورد ====================
+class BotKeyboard:
+    @staticmethod
+    def get_main_keyboard():
+        keyboard = [
+            ['🎨 تولید تصویر', '🖼️ ویرایش تصویر'],
+            ['📊 تاریخچه', '📈 آمار من'],
+            ['📖 راهنما', 'ℹ️ درباره']
+        ]
+        return {
+            'keyboard': keyboard,
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+            'persistent': True
+        }
+    
+    @staticmethod
+    def get_cancel_keyboard():
+        keyboard = [
+            ['❌ لغو عملیات']
+        ]
+        return {
+            'keyboard': keyboard,
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+            'persistent': True
+        }
+
+# ==================== مدیریت کاربر ====================
+class UserManager:
+    @staticmethod
+    def register_user(update: Dict):
+        message = update.get('message', {})
+        chat = message.get('chat', {})
+        chat_id = str(chat.get('id'))
+        user = message.get('from', {})
+        
+        db.create_user(
+            chat_id=chat_id,
+            username=user.get('username', ''),
+            first_name=user.get('first_name', ''),
+            last_name=user.get('last_name', '')
+        )
+        return chat_id
+    
+    @staticmethod
+    def get_stats(chat_id: str) -> str:
+        user = db.get_user(chat_id)
+        if not user:
+            return "❌ کاربری یافت نشد."
+        
+        return f"""
+📊 **آمار شما**
+
+👤 کاربر: {user.get('first_name', 'ناشناس')}
+📅 تاریخ ثبت: {user.get('registered_at', 'نامشخص')}
+🖼️ تعداد تصاویر: {user.get('total_images', 0)}
+"""
+    
+    @staticmethod
+    def get_history(chat_id: str) -> str:
+        history = db.get_history(chat_id)
+        
+        if not history:
+            return "📭 هنوز تصویری تولید نکرده‌اید."
+        
+        text = "📜 **تاریخچه تصاویر شما**\n\n"
+        for i, item in enumerate(history, 1):
+            text += f"{i}. 📝 {item['prompt'][:50]}...\n"
+            text += f"   🕐 {item['created_at'][:16]}\n"
+            text += f"   🔗 [مشاهده تصویر]({item['image_url']})\n\n"
+        
+        return text
+    
+    @staticmethod
+    def get_help_message() -> str:
+        return """
+🎨 **راهنمای ربات تصویرسازی با FLUX**
+
+🤖 **قابلیت‌ها:**
+1. 🎨 تولید تصویر از متن
+2. 🖼️ ویرایش تصویر با دستور متنی
+3. 📊 تاریخچه تصاویر شما
+4. 📈 آمار استفاده
+
+📝 **نحوه استفاده:**
+• روی دکمه "🎨 تولید تصویر" کلیک کنید
+• دستور خود را وارد کنید
+• منتظر بمانید تا تصویر ساخته شود
+
+⚡ **مدل‌ها:**
+• FLUX.1 Pro - کیفیت بالا
+• FLUX.1 Dev - سرعت بالا
+• FLUX.1 Schnell - سریع‌ترین
+
+⚠️ **توجه:** تولید هر تصویر چند ثانیه زمان می‌برد.
+"""
+    
+    @staticmethod
+    def generate_image(chat_id: str, prompt: str, model: str = "flux-pro") -> str:
+        db.increment_images(chat_id)
+        
+        # ارسال پیام انتظار
+        TelegramBot.send_message(
+            chat_id,
+            "🎨 **در حال تولید تصویر...**\n\n⏳ لطفاً چند ثانیه صبر کنید."
+        )
+        
+        image_url = flux.generate_image(prompt, model)
+        
+        if image_url:
+            db.save_image(chat_id, prompt, image_url, model)
+            return f"""
+🎨 **تصویر شما آماده است!**
+
+📝 **دستور:** {prompt}
+
+🖼️ [مشاهده تصویر]({image_url})
+
+💡 برای تولید دوباره، دکمه "🎨 تولید تصویر" را بزنید.
+"""
         else:
-            if (g_month == s_month and g_day >= s_day) or (g_month == e_month and g_day <= e_day):
-                return z
-    return ZODIAC[0]
+            return """
+❌ **خطا در تولید تصویر!**
 
-# =========================
-# معادن و کواکب
-# =========================
-MINERALS = {
-    "شمس": {"metal": "طلا", "plant": "صندل", "animal": "شیر", "incense": "عود", "color": "زرد"},
-    "قمر": {"metal": "نقره", "plant": "کافور", "animal": "فیل", "incense": "قسط أبيض", "color": "سفید"},
-    "مریخ": {"metal": "مس", "plant": "فلفل", "animal": "پلنگ", "incense": "فلفل", "color": "قرمز"},
-    "عطارد": {"metal": "زئبق", "plant": "ریحان", "animal": "کبوتر", "incense": "شمع أبيض", "color": "آبی"},
-    "مشتری": {"metal": "قلع", "plant": "لبان", "animal": "گاو", "incense": "لبان أبيض", "color": "سبز"},
-    "زهره": {"metal": "مس قرمز", "plant": "گلاب", "animal": "کبوتر", "incense": "مسک", "color": "صورتی"},
-    "زحل": {"metal": "سرب", "plant": "بنفشه", "animal": "خفاش", "incense": "صمغ أسود", "color": "سیاه"}
-}
+ممکن است:
+• کلید API معتبر نباشد
+• سرویس موقتاً در دسترس نباشد
+• دستور شما قابل پردازش نباشد
 
-def get_mineral(planet):
-    return MINERALS.get(planet, {"metal": "نامشخص", "plant": "نامشخص", "animal": "نامشخص", "incense": "نامشخص", "color": "نامشخص"})
-
-# =========================
-# جفر ۳۶ و ۳۶۰
-# =========================
-def jafar_36(question):
-    total = abjad_sum(question)
-    remainder = total % 36
-    return {
-        "total": total,
-        "remainder": remainder,
-        "answer": "✅ بله - با احتمال زیاد" if remainder <= 9 else "❌ خیر - مشکل دارد" if remainder > 27 else "⚠️ بله - با احتیاط" if remainder <= 18 else "❓ شاید - مصلحت نیست",
-        "score": 85 if remainder <= 9 else 30 if remainder > 27 else 65 if remainder <= 18 else 50,
-        "advice": "مانعی نیست، اقدام کن" if remainder <= 9 else "بهتر است منصرف شوید" if remainder > 27 else "صدقه بدهید و توکل کنید" if remainder <= 18 else "چند روز صبر کنید"
-    }
-
-def jafar_360(question, name, mother):
-    total = abjad_sum(question) + abjad_sum(name) + abjad_sum(mother)
-    remainder = total % 360
-    return {
-        "total": total,
-        "remainder": remainder,
-        "answer": "✅ بله قطعی - گشایش بزرگ" if remainder < 30 else "✅ بله - موفقیت" if remainder < 90 else "⚠️ احتمالاً - با تلاش" if remainder < 150 else "❓ شاید - صبر کن" if remainder < 210 else "❌ خیر - مانع داره" if remainder < 270 else "❌ خیر قطعی - مشکل داره",
-        "score": 98 if remainder < 30 else 85 if remainder < 90 else 65 if remainder < 150 else 50 if remainder < 210 else 35 if remainder < 270 else 20,
-        "degree": "عالی" if remainder < 30 else "خوب" if remainder < 90 else "متوسط" if remainder < 150 else "متوسط" if remainder < 210 else "ضعیف" if remainder < 270 else "خیلی ضعیف",
-        "advice": "بدون تردید اقدام کن" if remainder < 30 else "زمان مناسبه، اقدام کن" if remainder < 90 else "تلاش بیشتری کن" if remainder < 150 else "فعلاً صبر کن" if remainder < 210 else "بهتره منصرف شی" if remainder < 270 else "اصلاً مناسب نیست"
-    }
-
-# =========================
-# رمل ۸ و ۱۶ شکل
-# =========================
-RAML_8 = {
-    "اطلال": {"sign": "⚪⚪⚪⚪", "meaning": "رفتن و از دست دادن", "good": False},
-    "نقا": {"sign": "⚪⚪⚪⚫", "meaning": "نقص و کمبود", "good": False},
-    "عقله": {"sign": "⚪⚪⚫⚪", "meaning": "عقل و تدبیر", "good": True},
-    "بید": {"sign": "⚪⚪⚫⚫", "meaning": "محبت", "good": True},
-    "سعاده": {"sign": "⚪⚫⚪⚪", "meaning": "خوشبختی", "good": True},
-    "رجل": {"sign": "⚪⚫⚪⚫", "meaning": "مردانگی", "good": True},
-    "نصر": {"sign": "⚫⚪⚫⚪", "meaning": "پیروزی", "good": True},
-    "ثابت": {"sign": "⚫⚫⚫⚫", "meaning": "ثبات", "good": True}
-}
-
-RAML_16 = {
-    "اطلال": {"sign": "⚪⚪⚪⚪", "meaning": "رفتن و از دست دادن", "good": False},
-    "منقاد": {"sign": "⚪⚪⚪⚫", "meaning": "فرمانبردار", "good": True},
-    "انفراد": {"sign": "⚪⚪⚫⚪", "meaning": "تنهایی", "good": False},
-    "اتصال": {"sign": "⚪⚪⚫⚫", "meaning": "ارتباط", "good": True},
-    "فتح": {"sign": "⚪⚫⚪⚪", "meaning": "گشایش", "good": True},
-    "نصر": {"sign": "⚪⚫⚪⚫", "meaning": "پیروزی", "good": True},
-    "سعادت": {"sign": "⚪⚫⚫⚪", "meaning": "خوشبختی", "good": True},
-    "عاقبت": {"sign": "⚪⚫⚫⚫", "meaning": "پایان", "good": False},
-    "زیاده": {"sign": "⚫⚪⚪⚪", "meaning": "افزایش", "good": True},
-    "نقصان": {"sign": "⚫⚪⚪⚫", "meaning": "کمبود", "good": False},
-    "اجتماع": {"sign": "⚫⚪⚫⚪", "meaning": "جمع شدن", "good": True},
-    "افتراق": {"sign": "⚫⚪⚫⚫", "meaning": "جدایی", "good": False},
-    "جذب": {"sign": "⚫⚫⚪⚪", "meaning": "جذب", "good": True},
-    "دفع": {"sign": "⚫⚫⚪⚫", "meaning": "دفع", "good": False},
-    "نور": {"sign": "⚫⚫⚫⚪", "meaning": "روشنایی", "good": True},
-    "ظلمت": {"sign": "⚫⚫⚫⚫", "meaning": "تاریکی", "good": False}
-}
-
-def raml_extract(name, use_16=False):
-    total = abjad_sum(name)
-    raml_dict = RAML_16 if use_16 else RAML_8
-    keys = list(raml_dict.keys())
-    shape_key = keys[total % len(keys)]
-    shape = raml_dict[shape_key]
-    return {"shape": shape_key, "sign": shape["sign"], "meaning": shape["meaning"], "good": shape["good"]}
-
-# =========================
-# همزاد
-# =========================
-HAMZAD_SYMPTOMS = [
-    "تنگی رزق", "عصبانیت بی‌دلیل", "کم شدن آرامش", "افکار منفی",
-    "ترس از تاریکی", "گره در امورات", "افسردگی", "باردار نشدن",
-    "بیماری‌های جسمی", "ریزش مو", "بستگی بخت", "بدبیاری متوالی"
-]
-
-def check_hamzad(symptoms):
-    matched = [s for s in symptoms if s in HAMZAD_SYMPTOMS]
-    severity = "شدید" if len(matched) >= 8 else "متوسط" if len(matched) >= 4 else "ضعیف" if len(matched) >= 1 else "هیچ"
-    return {"has_hamzad": len(matched) >= 4, "matched_symptoms": matched, "severity": severity, "advice": "آیت الکرسی و سوره فلق و ناس را بخوانید"}
-
-def hamzad_name(name):
-    total = abjad_sum(name)
-    letters = list(name)
-    return {"malaki": ''.join(letters[:5]) + "اییل" if len(letters) >= 5 else ''.join(letters) + "اییل", "jinni": ''.join(letters[-5:]) + "ؤش" if len(letters) >= 5 else ''.join(letters) + "ؤش", "total": total}
-
-# =========================
-# زایجه عدل
-# =========================
-def zayejah_adl(question, day, hour=None):
-    if hour is None:
-        hour = datetime.now().hour
-    total = abjad_sum(question)
-    hour_type = 3 if hour % 2 == 1 else 4
-    main_num = total + day + hour_type
-    remainder = main_num % 4
-    tabaye = {1: "آتش", 2: "خاک", 3: "هوا", 0: "آب"}
-    interpretations = {"آتش": "خیر و برکت با سرعت", "خاک": "پایداری با صبر", "هوا": "گشایش با کمک", "آب": "آرامش با احساسات"}
-    return {"tab": tabaye[remainder], "text": interpretations[tabaye[remainder]], "remainder": remainder}
-
-# =========================
-# اوقات سعد و نحس
-# =========================
-def get_saad_nahs(day, month, year):
-    lunar_day = (day + month) % 30 + 1
-    lunar_month = (month + year) % 12 + 1
-    saad_list = {
-        1: [1,3,5,7,9,11,13], 2: [2,4,6,8,10,12,14],
-        3: [1,4,7,10,13,16,19], 4: [3,6,9,12,15,18,21],
-        5: [5,10,15,20,25,30], 6: [2,7,12,17,22,27],
-        7: [1,8,15,22,29], 8: [2,9,16,23,30],
-        9: [1,4,7,10,13,16,19,22], 10: [3,6,9,12,15,18,21,24],
-        11: [5,10,15,20,25,30], 12: [2,7,12,17,22,27]
-    }
-    saad = saad_list.get(lunar_month, [])
-    return {"lunar_day": lunar_day, "is_saad": lunar_day in saad, "status": "سعد" if lunar_day in saad else "نحس"}
-
-# =========================
-# تکسیر و بسط
-# =========================
-def taksir_correct(word):
-    if not word:
-        return {"lines": [], "zamam": None}
-    chars = list(word)
-    all_lines = [word]
-    current = chars.copy()
-    for _ in range(4):
-        new_chars = []
-        left, right = 0, len(current) - 1
-        while left <= right:
-            if left == right:
-                new_chars.append(current[left])
-                break
-            new_chars.append(current[left])
-            new_chars.append(current[right])
-            left += 1
-            right -= 1
-        new_word = ''.join(new_chars)
-        all_lines.append(new_word)
-        current = new_chars
-        if new_word == word:
-            break
-    return {"lines": all_lines, "zamam": all_lines[-1] if len(all_lines) > 1 else None}
-
-def basts_azizi(name, mother):
-    combined = name + mother
-    total_abjad = abjad_sum(combined)
-    letters = list(combined)
-    malak = ''.join(letters[:5]) + "ائیل" if len(letters) >= 5 else ''.join(letters) + "ائیل"
-    awn = ''.join(letters[-5:]) + "وش" if len(letters) >= 5 else ''.join(letters) + "وش"
-    return {"malak": malak, "awn": awn, "total_abjad": total_abjad}
-
-# =========================
-# 🧠 تحلیل کامل با نمایش مراحل محاسبه (با فاصله ۵ ثانیه)
-# =========================
-async def run_analysis_async(chat_id, data):
-    name = data.get('name', '')
-    mother = data.get('mother', '')
-    day = data.get('day', 1)
-    month = data.get('month', 1)
-    year = data.get('year', 1300)
-    question = data.get('question', '')
-    hour = datetime.now().hour
-
-    # 1️⃣ برج فلکی و عناصر
-    zodiac = get_zodiac_info(day, month, year)
-    planet = zodiac["planet"]
-    element = zodiac["element"]
-    mineral = get_mineral(planet)
-
-    life_path = sum(int(d) for d in f"{day}{month}{year}")
-    while life_path > 9:
-        life_path = sum(int(d) for d in str(life_path))
-
-    # نمایش برج فلکی
-    msg = f"""
-📊 **مرحله ۱: برج فلکی و عناصر**
-
-📅 تاریخ تولد: {day}/{month}/{year}
-🔢 عدد سرنوشت: {life_path}
-
-🌟 برج: {zodiac['name']}
-🌍 عنصر: {element}
-🪐 سیاره: {planet}
-💎 سنگ: {zodiac['stone']}
-⚗️ فلز: {mineral['metal']}
-🌿 گیاه: {mineral['plant']}
-🎨 رنگ: {mineral['color']}
+لطفاً دوباره تلاش کنید یا بعداً امتحان کنید.
 """
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
+    
+    @staticmethod
+    def edit_image(chat_id: str, image_url: str, prompt: str) -> str:
+        db.increment_images(chat_id)
+        
+        TelegramBot.send_message(
+            chat_id,
+            "🖼️ **در حال ویرایش تصویر...**\n\n⏳ لطفاً چند ثانیه صبر کنید."
+        )
+        
+        result_url = flux.edit_image(image_url, prompt)
+        
+        if result_url:
+            db.save_image(chat_id, f"ویرایش: {prompt}", result_url, "flux-kontext")
+            return f"""
+🖼️ **تصویر ویرایش شده!**
 
-    # 2️⃣ جفر ۳۶
-    j36 = jafar_36(question)
-    msg = f"""
-📊 **مرحله ۲: جفر ۳۶**
+📝 **دستور:** {prompt}
 
-📜 سوال: {question}
-🧮 محاسبه: ابجد سوال = {j36['total']}
-🔢 باقیمانده: {j36['total']} % 36 = {j36['remainder']}
+🖼️ [مشاهده تصویر]({result_url})
 
-{j36['answer']}
-⭐ امتیاز: {j36['score']}/100
-💡 توصیه: {j36['advice']}
+💡 برای ویرایش دوباره، دکمه "🖼️ ویرایش تصویر" را بزنید.
 """
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
+        else:
+            return """
+❌ **خطا در ویرایش تصویر!**
 
-    # 3️⃣ جفر ۳۶۰
-    j360 = jafar_360(question, name, mother)
-    msg = f"""
-📊 **مرحله ۳: جفر ۳۶۰**
-
-📜 سوال: {question}
-👤 نام: {name}
-👩 نام مادر: {mother}
-🧮 محاسبه: ابجد سوال + ابجد نام + ابجد مادر = {j360['total']}
-🔢 باقیمانده: {j360['total']} % 360 = {j360['remainder']}
-
-{j360['answer']}
-⭐ امتیاز: {j360['score']}/100
-📊 درجه: {j360['degree']}
-💡 توصیه: {j360['advice']}
+لطفاً دوباره تلاش کنید.
 """
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
 
-    # 4️⃣ رمل ۸ و ۱۶
-    raml8 = raml_extract(name, use_16=False)
-    raml16 = raml_extract(name, use_16=True)
-    msg = f"""
-📊 **مرحله ۴: رمل**
+# ==================== تلگرام ====================
+class TelegramBot:
+    BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
+    
+    @staticmethod
+    def send_message(chat_id: str, text: str, parse_mode: str = 'Markdown', 
+                     reply_markup: Optional[Dict] = None) -> bool:
+        try:
+            payload = {
+                'chat_id': chat_id,
+                'text': text,
+                'parse_mode': parse_mode
+            }
+            if reply_markup is None:
+                reply_markup = BotKeyboard.get_main_keyboard()
+            payload['reply_markup'] = json.dumps(reply_markup)
+            
+            response = requests.post(
+                f"{TelegramBot.BASE_URL}/sendMessage",
+                json=payload,
+                timeout=10
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"خطا در ارسال پیام: {e}")
+            return False
+    
+    @staticmethod
+    def send_photo(chat_id: str, photo_url: str, caption: str = "") -> bool:
+        try:
+            payload = {
+                'chat_id': chat_id,
+                'photo': photo_url,
+                'caption': caption,
+                'parse_mode': 'Markdown'
+            }
+            response = requests.post(
+                f"{TelegramBot.BASE_URL}/sendPhoto",
+                json=payload,
+                timeout=30
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"خطا در ارسال تصویر: {e}")
+            return False
 
-👤 نام: {name}
-🧮 محاسبه: ابجد نام = {abjad_sum(name)}
-
-🎲 رمل ۸: {raml8['sign']} → {raml8['meaning']}
-🎲 رمل ۱۶: {raml16['sign']} → {raml16['meaning']}
-"""
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
-
-    # 5️⃣ همزاد
-    hamzad_names = hamzad_name(name)
-    msg = f"""
-📊 **مرحله ۵: همزاد**
-
-👤 نام: {name}
-🧮 محاسبه: ابجد نام = {abjad_sum(name)}
-
-👹 اسم ملکی: {hamzad_names['malaki']}
-👹 اسم جنی: {hamzad_names['jinni']}
-"""
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
-
-    # 6️⃣ تکسیر و بسط
-    taksir = taksir_correct(name + mother)
-    basts = basts_azizi(name, mother)
-    msg = f"""
-📊 **مرحله ۶: تکسیر و بسط**
-
-👤 نام: {name}
-👩 نام مادر: {mother}
-
-📖 تکسیر (تجزیه): {taksir['zamam'] if taksir['zamam'] else '---'}
-📖 بسط (ترکیب): {basts['malak']} - {basts['awn']}
-"""
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
-
-    # 7️⃣ زایجه عدل
-    zayejah = zayejah_adl(question, day, hour)
-    msg = f"""
-📊 **مرحله ۷: زایجه عدل**
-
-❓ سوال: {question}
-🕐 ساعت: {hour}
-⚗️ طبع: {zayejah['tab']}
-💬 تعبیر: {zayejah['text']}
-"""
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
-
-    # 8️⃣ اوقات سعد و نحس
-    saad_nahs = get_saad_nahs(day, month, year)
-    msg = f"""
-📊 **مرحله ۸: اوقات سعد و نحس**
-
-📅 روز قمری: {saad_nahs['lunar_day']}
-⏰ وضعیت: {saad_nahs['status']}
-"""
-    send_message_async(chat_id, msg)
-    await asyncio.sleep(5)
-
-    # 9️⃣ توصیه نهایی
-    msg = f"""
-📊 **توصیه نهایی**
-
-💡 {j36['advice']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ تحلیل کامل شد!
-"""
-    send_message_async(chat_id, msg)
-
-# =========================
-# 🌐 روت‌ها
-# =========================
-@app.route("/")
-def home():
-    return "Bot Running", 200
-
-@app.route("/webhook", methods=["POST"])
+# ==================== وب‌هوک ====================
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    update = request.get_json()
-    if not update:
-        return "ok", 200
-
-    if "message" in update:
-        chat_id = update["message"]["chat"]["id"]
-        text = update["message"].get("text", "")
-
-        if text == "/start":
-            send_message(
+    try:
+        update = request.get_json()
+        if not update:
+            return jsonify({'status': 'ok'}), 200
+        
+        if 'message' in update:
+            message = update['message']
+            chat_id = str(message['chat']['id'])
+            text = message.get('text', '').strip()
+            photo = message.get('photo')
+            caption = message.get('caption', '').strip()
+            
+            UserManager.register_user(update)
+            
+            # ===== دستورات =====
+            if text == '/start' or text == '/menu':
+                TelegramBot.send_message(
+                    chat_id,
+                    "🎨 **ربات تصویرسازی با FLUX**\n\nسلام! 👋\nبا این ربات می‌توانید:\n• 🎨 از متن تصویر بسازید\n• 🖼️ تصاویر را ویرایش کنید\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+                    reply_markup=BotKeyboard.get_main_keyboard()
+                )
+                return jsonify({'status': 'ok'}), 200
+            
+            # ===== دکمه‌ها =====
+            elif text == '🎨 تولید تصویر':
+                db.save_session(chat_id, 'generate_prompt')
+                TelegramBot.send_message(
+                    chat_id,
+                    "🎨 **تولید تصویر از متن**\n\nلطفاً دستور خود را وارد کنید:\n\nمثال: «یک گربه سیاه در کنار دریاچه»",
+                    reply_markup=BotKeyboard.get_cancel_keyboard()
+                )
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == '🖼️ ویرایش تصویر':
+                db.save_session(chat_id, 'edit_image')
+                TelegramBot.send_message(
+                    chat_id,
+                    "🖼️ **ویرایش تصویر**\n\nلطفاً یک تصویر ارسال کنید و در کپشن آن دستور ویرایش را بنویسید.\n\nمثال: «پس‌زمینه را به جنگل تغییر بده»",
+                    reply_markup=BotKeyboard.get_cancel_keyboard()
+                )
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == '📊 تاریخچه':
+                response = UserManager.get_history(chat_id)
+                TelegramBot.send_message(chat_id, response)
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == '📈 آمار من':
+                response = UserManager.get_stats(chat_id)
+                TelegramBot.send_message(chat_id, response)
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == '📖 راهنما':
+                TelegramBot.send_message(chat_id, UserManager.get_help_message())
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == 'ℹ️ درباره':
+                TelegramBot.send_message(
+                    chat_id,
+                    "ℹ️ **درباره ربات**\n\nنسخه ۱.۰.۰\nربات تصویرسازی با FLUX\n\n⚡ **قابلیت‌ها:**\n• 🎨 تولید تصویر از متن\n• 🖼️ ویرایش تصویر با AI\n• 📊 تاریخچه تصاویر\n• 📈 آمار کاربری\n\n🔧 **مدل‌ها:**\n• FLUX.1 Pro\n• FLUX.1 Dev\n• FLUX.1 Schnell\n• FLUX Kontext"
+                )
+                return jsonify({'status': 'ok'}), 200
+            
+            elif text == '❌ لغو عملیات':
+                db.delete_session(chat_id)
+                TelegramBot.send_message(
+                    chat_id,
+                    "❌ عملیات لغو شد.",
+                    reply_markup=BotKeyboard.get_main_keyboard()
+                )
+                return jsonify({'status': 'ok'}), 200
+            
+            # ===== پردازش عکس =====
+            if photo and caption:
+                session = db.get_session(chat_id)
+                if session and session.get('step') == 'edit_image':
+                    # دریافت URL تصویر
+                    file_id = photo[-1]['file_id']
+                    file_info = requests.get(
+                        f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+                    ).json()
+                    file_path = file_info['result']['file_path']
+                    image_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+                    
+                    result = UserManager.edit_image(chat_id, image_url, caption)
+                    db.delete_session(chat_id)
+                    TelegramBot.send_message(chat_id, result)
+                    return jsonify({'status': 'ok'}), 200
+            
+            # ===== پردازش مراحل =====
+            session = db.get_session(chat_id)
+            if session:
+                step = session.get('step')
+                
+                if step == 'generate_prompt':
+                    result = UserManager.generate_image(chat_id, text)
+                    db.delete_session(chat_id)
+                    TelegramBot.send_message(chat_id, result)
+                    return jsonify({'status': 'ok'}), 200
+            
+            # ===== دستور نامشخص =====
+            TelegramBot.send_message(
                 chat_id,
-                """
-📜 سامانه تخصصی تحلیل
-
-این سامانه بر پایه منابع معتبر، نسخه‌های خطی و متون تخصصی گردآوری شده است.
-
-جهت ورود به بخش تحلیل و بررسی اطلاعات، ادامه فرایند را انتخاب نمایید.
-"""
+                "🤔 دستور نامشخص. لطفاً از دکمه‌های پایین استفاده کنید.",
+                reply_markup=BotKeyboard.get_main_keyboard()
             )
+            return jsonify({'status': 'ok'}), 200
+        
+        return jsonify({'status': 'ok'}), 200
+        
+    except Exception as e:
+        logger.error(f"خطا: {e}")
+        return jsonify({'error': str(e)}), 500
 
-        elif text == "/analyze":
-            user_data[chat_id] = {"step": "name"}
-            send_message(chat_id, "👤 لطفاً **نام** خود را وارد کنید:")
+# ==================== صفحه اصلی ====================
+@app.route('/')
+def home():
+    return """
+    <h1>🎨 ربات تصویرسازی با FLUX</h1>
+    <p>ربات آنلاین و فعال است ✅</p>
+    <p>🔮 تولید و ویرایش تصویر با هوش مصنوعی FLUX</p>
+    <p>نسخه ۱.۰.۰</p>
+    """
 
-        elif text == "/history":
-            send_message(chat_id, "📂 هنوز تحلیلی ثبت نشده است.")
-
-        elif text == "/rules":
-            send_message(
-                chat_id,
-                """
-📜 قوانین استفاده
-
-۱. استفاده از این سامانه به منزله پذیرش کامل قوانین و شرایط آن است.
-
-۲. اطلاعات وارد شده توسط کاربر، صرفاً برای انجام تحلیل استفاده می‌شود و هیچگونه اطلاعات شخصی ذخیره نمی‌گردد.
-
-۳. نتایج تحلیل صرفاً جنبه پژوهشی و اطلاع‌رسانی دارد.
-"""
-            )
-
-        elif text == "/about":
-            send_message(
-                chat_id,
-                """
-📖 درباره سامانه
-
-این سامانه با هدف افزایش آگاهی کاربران و جلوگیری از هرگونه سوءاستفاده احتمالی توسط افراد سودجو و شیاد طراحی و راه‌اندازی شده است.
-
-هدف اصلی این مجموعه، فراهم کردن بستری برای ثبت، نگهداری و بررسی اطلاعات در محیطی منظم و یکپارچه است تا کاربران بتوانند با دسترسی آسان به سوابق و اطلاعات مورد نیاز خود، تصمیمات آگاهانه‌تری اتخاذ نمایند.
-"""
-            )
-
-        elif text == "/contact":
-            user_data[chat_id] = {"step": "contact_message"}
-            send_message(
-                chat_id,
-                "✏️ لطفاً **پیام خود** را برای ادمین بنویسید:",
-                cancel_keyboard()
-            )
-
+# ==================== منوی پایین ====================
+def set_bot_commands():
+    try:
+        commands = [
+            {"command": "start", "description": "🔄 شروع مجدد"},
+            {"command": "menu", "description": "📋 منوی اصلی"},
+            {"command": "history", "description": "📊 تاریخچه"},
+            {"command": "stats", "description": "📈 آمار من"},
+            {"command": "help", "description": "📖 راهنما"}
+        ]
+        
+        url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
+        response = requests.post(url, json={"commands": commands}, timeout=10)
+        
+        if response.status_code == 200:
+            logger.info("✅ منوی پایین با موفقیت ثبت شد")
+            return True
         else:
-            process_analysis(chat_id, text)
+            logger.error(f"❌ خطا در ثبت منو: {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ خطا در ثبت منو: {e}")
+        return False
 
-    return "ok", 200
-
-# =========================
-# 🚀 اجرا
-# =========================
-if __name__ == "__main__":
-    set_commands()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# ==================== اجرا ====================
+if __name__ == '__main__':
+    print("🎨 ثبت منوی پایین تلگرام...")
+    set_bot_commands()
+    
+    if not FAL_API_KEY:
+        print("⚠️ هشدار: FAL_API_KEY تنظیم نشده است!")
+    
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 ربات تصویرسازی روی پورت {port} اجرا شد")
+    app.run(host='0.0.0.0', port=port, debug=False)

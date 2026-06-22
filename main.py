@@ -1,147 +1,502 @@
-# ==================== main.py - ربات تصویرسازی بدون محدودیت ====================
-
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import requests
-from datetime import datetime
+import os
+import time
 import json
 import logging
-import os
-import sqlite3
-from contextlib import contextmanager
-import time
-from typing import Dict, Optional, List
 
-# ==================== تنظیمات اولیه ====================
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
 
-TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8624726972:AAHa89X4pWrLaD7c-GI3OUjmx7FuSL-5pQQ')
-REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
+# ==================== صفحه اصلی وب (مثل Perchance Revival) ====================
+@app.route('/')
+def home():
+    return """
+    <!DOCTYPE html>
+    <html dir="rtl" lang="fa">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🎨 ربات تصویرسازی</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Vazir', Tahoma, sans-serif;
+                background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+                color: #fff;
+            }
+            .container {
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 20px;
+                padding: 40px;
+                max-width: 700px;
+                width: 100%;
+                border: 1px solid rgba(255,255,255,0.1);
+                box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            }
+            h1 {
+                text-align: center;
+                font-size: 32px;
+                margin-bottom: 10px;
+                background: linear-gradient(90deg, #f7971e, #ffd200);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .subtitle {
+                text-align: center;
+                color: #aaa;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+            .tab-container {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 30px;
+                background: rgba(255,255,255,0.05);
+                border-radius: 12px;
+                padding: 5px;
+            }
+            .tab {
+                flex: 1;
+                padding: 12px;
+                text-align: center;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.3s;
+                border: none;
+                background: transparent;
+                color: #888;
+                font-size: 14px;
+            }
+            .tab.active {
+                background: linear-gradient(90deg, #f7971e, #ffd200);
+                color: #1a1a2e;
+                font-weight: bold;
+            }
+            .tab:hover {
+                color: #fff;
+            }
+            .tab-content {
+                display: none;
+                animation: fadeIn 0.5s;
+            }
+            .tab-content.active {
+                display: block;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #ddd;
+            }
+            textarea, input[type="text"] {
+                width: 100%;
+                padding: 12px;
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.1);
+                background: rgba(255,255,255,0.05);
+                color: #fff;
+                font-size: 14px;
+                transition: border 0.3s;
+                resize: vertical;
+                font-family: inherit;
+            }
+            textarea:focus, input:focus {
+                outline: none;
+                border-color: #f7971e;
+            }
+            .row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            }
+            input[type="range"] {
+                width: 100%;
+                -webkit-appearance: none;
+                background: rgba(255,255,255,0.1);
+                height: 4px;
+                border-radius: 2px;
+                outline: none;
+            }
+            input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: linear-gradient(90deg, #f7971e, #ffd200);
+                cursor: pointer;
+            }
+            .range-value {
+                float: right;
+                color: #ffd200;
+                font-weight: bold;
+            }
+            .btn-generate {
+                width: 100%;
+                padding: 15px;
+                border: none;
+                border-radius: 12px;
+                background: linear-gradient(90deg, #f7971e, #ffd200);
+                color: #1a1a2e;
+                font-size: 18px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
+            .btn-generate:hover {
+                transform: scale(1.02);
+                box-shadow: 0 10px 30px rgba(247, 151, 30, 0.3);
+            }
+            .btn-generate:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .result-container {
+                margin-top: 30px;
+                display: none;
+            }
+            .result-container.show {
+                display: block;
+            }
+            .result-image {
+                width: 100%;
+                border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            }
+            .loading {
+                text-align: center;
+                padding: 40px;
+                display: none;
+            }
+            .loading.show {
+                display: block;
+            }
+            .spinner {
+                width: 50px;
+                height: 50px;
+                border: 4px solid rgba(255,255,255,0.1);
+                border-top-color: #ffd200;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+            .prompt-history {
+                margin-top: 20px;
+                padding: 15px;
+                background: rgba(255,255,255,0.03);
+                border-radius: 10px;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            .prompt-history h4 {
+                color: #888;
+                margin-bottom: 10px;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .prompt-item {
+                padding: 8px 12px;
+                background: rgba(255,255,255,0.05);
+                border-radius: 6px;
+                margin-bottom: 5px;
+                font-size: 12px;
+                color: #aaa;
+                cursor: pointer;
+                transition: background 0.3s;
+            }
+            .prompt-item:hover {
+                background: rgba(255,255,255,0.1);
+                color: #fff;
+            }
+            .footer {
+                text-align: center;
+                margin-top: 30px;
+                font-size: 12px;
+                color: #555;
+            }
+            @media (max-width: 600px) {
+                .container { padding: 20px; }
+                .row { grid-template-columns: 1fr; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎨 ربات تصویرسازی</h1>
+            <p class="subtitle">⚡ FLUX Uncensored • بدون محدودیت</p>
 
-# ==================== دیتابیس ====================
-class Database:
-    def __init__(self, db_path='flux_bot.db'):
-        self.db_path = db_path
-        self.init_db()
-    
-    @contextmanager
-    def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-        finally:
-            conn.close()
-    
-    def init_db(self):
-        with self.get_connection() as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    chat_id TEXT PRIMARY KEY,
-                    username TEXT,
-                    first_name TEXT,
-                    last_name TEXT,
-                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_images INTEGER DEFAULT 0
-                )
-            ''')
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS image_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id TEXT,
-                    prompt TEXT,
-                    image_url TEXT,
-                    model TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS user_sessions (
-                    chat_id TEXT PRIMARY KEY,
-                    step TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-            logger.info("✅ دیتابیس راه‌اندازی شد")
-    
-    def get_user(self, chat_id: str) -> Optional[Dict]:
-        with self.get_connection() as conn:
-            result = conn.execute('SELECT * FROM users WHERE chat_id = ?', (chat_id,)).fetchone()
-            return dict(result) if result else None
-    
-    def create_user(self, chat_id: str, username: str = '', first_name: str = '', last_name: str = ''):
-        with self.get_connection() as conn:
-            conn.execute(
-                'INSERT OR REPLACE INTO users (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
-                (chat_id, username, first_name, last_name)
-            )
-            conn.commit()
-    
-    def increment_images(self, chat_id: str):
-        with self.get_connection() as conn:
-            conn.execute('UPDATE users SET total_images = total_images + 1 WHERE chat_id = ?', (chat_id,))
-            conn.commit()
-    
-    def save_image(self, chat_id: str, prompt: str, image_url: str, model: str = "flux-uncensored"):
-        with self.get_connection() as conn:
-            conn.execute(
-                '''INSERT INTO image_history (chat_id, prompt, image_url, model) VALUES (?, ?, ?, ?)''',
-                (chat_id, prompt, image_url, model)
-            )
-            conn.commit()
-    
-    def get_history(self, chat_id: str, limit: int = 5):
-        with self.get_connection() as conn:
-            results = conn.execute(
-                '''SELECT prompt, image_url, model, created_at FROM image_history 
-                   WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?''',
-                (chat_id, limit)
-            ).fetchall()
-            return [dict(row) for row in results]
-    
-    def save_session(self, chat_id: str, step: str):
-        with self.get_connection() as conn:
-            conn.execute('DELETE FROM user_sessions WHERE chat_id = ?', (chat_id,))
-            conn.execute(
-                'INSERT INTO user_sessions (chat_id, step) VALUES (?, ?)',
-                (chat_id, step)
-            )
-            conn.commit()
-    
-    def get_session(self, chat_id: str) -> Optional[Dict]:
-        with self.get_connection() as conn:
-            result = conn.execute('SELECT * FROM user_sessions WHERE chat_id = ?', (chat_id,)).fetchone()
-            return dict(result) if result else None
-    
-    def delete_session(self, chat_id: str):
-        with self.get_connection() as conn:
-            conn.execute('DELETE FROM user_sessions WHERE chat_id = ?', (chat_id,))
-            conn.commit()
+            <div class="tab-container">
+                <button class="tab active" onclick="switchTab('txt2img')">🎨 متن به تصویر</button>
+                <button class="tab" onclick="switchTab('img2img')">🖼️ ویرایش تصویر</button>
+            </div>
 
-db = Database()
+            <!-- تب تولید متن به تصویر -->
+            <div id="txt2img" class="tab-content active">
+                <form id="generateForm">
+                    <div class="form-group">
+                        <label>📝 دستور (Prompt)</label>
+                        <textarea id="prompt" rows="3" placeholder="مثلاً: یک گربه سیاه در کنار دریاچه..." required></textarea>
+                    </div>
 
-# ==================== Replicate API (بدون محدودیت) ====================
-def wait_for_replicate_result(prediction_id: str, timeout: int = 120) -> Optional[str]:
-    """منتظر موندن برای نتیجه Replicate"""
+                    <div class="row">
+                        <div class="form-group">
+                            <label>📐 عرض (Width)</label>
+                            <input type="number" id="width" value="1024" min="256" max="2048" step="64">
+                        </div>
+                        <div class="form-group">
+                            <label>📐 ارتفاع (Height)</label>
+                            <input type="number" id="height" value="1024" min="256" max="2048" step="64">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>🔢 مراحل (Steps) <span class="range-value" id="stepsValue">20</span></label>
+                        <input type="range" id="steps" min="5" max="50" value="20" oninput="document.getElementById('stepsValue').textContent=this.value">
+                    </div>
+
+                    <div class="form-group">
+                        <label>⚙️ راهنمایی (CFG Scale) <span class="range-value" id="cfgValue">5</span></label>
+                        <input type="range" id="cfg" min="1" max="10" value="5" step="0.5" oninput="document.getElementById('cfgValue').textContent=this.value">
+                    </div>
+
+                    <button type="submit" class="btn-generate" id="generateBtn">🎨 تولید تصویر</button>
+                </form>
+            </div>
+
+            <!-- تب ویرایش تصویر -->
+            <div id="img2img" class="tab-content">
+                <form id="editForm">
+                    <div class="form-group">
+                        <label>🖼️ تصویر را انتخاب کنید</label>
+                        <input type="file" id="imageInput" accept="image/*" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>📝 دستور ویرایش</label>
+                        <textarea id="editPrompt" rows="3" placeholder="مثلاً: پس‌زمینه را به جنگل تغییر بده..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>💪 شدت تغییر (Strength) <span class="range-value" id="strengthValue">0.5</span></label>
+                        <input type="range" id="strength" min="0.1" max="0.9" value="0.5" step="0.05" oninput="document.getElementById('strengthValue').textContent=this.value">
+                    </div>
+
+                    <button type="submit" class="btn-generate" id="editBtn">🖼️ ویرایش تصویر</button>
+                </form>
+            </div>
+
+            <!-- بارگذاری -->
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>⏳ در حال تولید تصویر...</p>
+                <p style="font-size:12px;color:#666;">چند ثانیه صبر کنید</p>
+            </div>
+
+            <!-- نتیجه -->
+            <div class="result-container" id="resultContainer">
+                <img id="resultImage" class="result-image" alt="تصویر تولید شده">
+                <p id="resultCaption" style="margin-top:10px;font-size:14px;color:#aaa;text-align:center;"></p>
+                <div style="display:flex;gap:10px;margin-top:15px;">
+                    <button onclick="downloadImage()" style="flex:1;padding:10px;border:none;border-radius:8px;background:rgba(255,255,255,0.1);color:#fff;cursor:pointer;">💾 دانلود</button>
+                    <button onclick="resetForm()" style="flex:1;padding:10px;border:none;border-radius:8px;background:rgba(255,255,255,0.05);color:#888;cursor:pointer;">🔄 دوباره</button>
+                </div>
+            </div>
+
+            <!-- تاریخچه -->
+            <div class="prompt-history" id="historyContainer">
+                <h4>📜 تاریخچه</h4>
+                <div id="historyList">
+                    <div style="color:#555;font-size:12px;">هنوز تصویری تولید نشده</div>
+                </div>
+            </div>
+
+            <div class="footer">
+                ⚡ FLUX Uncensored • بدون محدودیت • نسخه ۲.۰.۰
+            </div>
+        </div>
+
+        <script>
+            let currentImageUrl = '';
+            let history = JSON.parse(localStorage.getItem('promptHistory') || '[]');
+
+            function switchTab(tab) {
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+                document.getElementById(tab).classList.add('active');
+                document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add('active');
+                document.getElementById('resultContainer').classList.remove('show');
+            }
+
+            function updateHistory(prompt, imageUrl) {
+                history.unshift({ prompt, imageUrl, time: new Date().toLocaleString() });
+                if (history.length > 10) history.pop();
+                localStorage.setItem('promptHistory', JSON.stringify(history));
+                renderHistory();
+            }
+
+            function renderHistory() {
+                const list = document.getElementById('historyList');
+                if (history.length === 0) {
+                    list.innerHTML = '<div style="color:#555;font-size:12px;">هنوز تصویری تولید نشده</div>';
+                    return;
+                }
+                list.innerHTML = history.map((item, index) => `
+                    <div class="prompt-item" onclick="loadPrompt(${index})">
+                        ${item.prompt.substring(0, 60)}${item.prompt.length > 60 ? '...' : ''}
+                        <span style="float:right;color:#555;font-size:10px;">${item.time}</span>
+                    </div>
+                `).join('');
+            }
+
+            function loadPrompt(index) {
+                const item = history[index];
+                document.getElementById('prompt').value = item.prompt;
+                if (item.imageUrl) {
+                    document.getElementById('resultImage').src = item.imageUrl;
+                    document.getElementById('resultContainer').classList.add('show');
+                    currentImageUrl = item.imageUrl;
+                }
+            }
+
+            function downloadImage() {
+                if (currentImageUrl) {
+                    const a = document.createElement('a');
+                    a.href = currentImageUrl;
+                    a.download = `image_${Date.now()}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            }
+
+            function resetForm() {
+                document.getElementById('resultContainer').classList.remove('show');
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('editBtn').disabled = false;
+                currentImageUrl = '';
+            }
+
+            // تولید تصویر
+            document.getElementById('generateForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const prompt = document.getElementById('prompt').value.trim();
+                if (!prompt) return alert('لطفاً دستور را وارد کنید');
+
+                const width = parseInt(document.getElementById('width').value);
+                const height = parseInt(document.getElementById('height').value);
+                const steps = parseInt(document.getElementById('steps').value);
+                const cfg = parseFloat(document.getElementById('cfg').value);
+
+                document.getElementById('loading').classList.add('show');
+                document.getElementById('generateBtn').disabled = true;
+                document.getElementById('resultContainer').classList.remove('show');
+
+                try {
+                    const response = await fetch('/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt, width, height, steps, cfg })
+                    });
+
+                    const data = await response.json();
+                    document.getElementById('loading').classList.remove('show');
+
+                    if (data.success && data.image_url) {
+                        document.getElementById('resultImage').src = data.image_url;
+                        document.getElementById('resultCaption').textContent = `✅ ${prompt}`;
+                        document.getElementById('resultContainer').classList.add('show');
+                        currentImageUrl = data.image_url;
+                        updateHistory(prompt, data.image_url);
+                    } else {
+                        alert('❌ خطا: ' + (data.error || 'مشخص نیست'));
+                    }
+                } catch (error) {
+                    document.getElementById('loading').classList.remove('show');
+                    alert('❌ خطا در ارتباط با سرور');
+                }
+                document.getElementById('generateBtn').disabled = false;
+            });
+
+            // ویرایش تصویر
+            document.getElementById('editForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fileInput = document.getElementById('imageInput');
+                const prompt = document.getElementById('editPrompt').value.trim();
+                const strength = parseFloat(document.getElementById('strength').value);
+
+                if (!fileInput.files.length) return alert('لطفاً یک تصویر انتخاب کنید');
+                if (!prompt) return alert('لطفاً دستور ویرایش را وارد کنید');
+
+                const formData = new FormData();
+                formData.append('image', fileInput.files[0]);
+                formData.append('prompt', prompt);
+                formData.append('strength', strength);
+
+                document.getElementById('loading').classList.add('show');
+                document.getElementById('editBtn').disabled = true;
+                document.getElementById('resultContainer').classList.remove('show');
+
+                try {
+                    const response = await fetch('/edit', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    document.getElementById('loading').classList.remove('show');
+
+                    if (data.success && data.image_url) {
+                        document.getElementById('resultImage').src = data.image_url;
+                        document.getElementById('resultCaption').textContent = `✅ ویرایش: ${prompt}`;
+                        document.getElementById('resultContainer').classList.add('show');
+                        currentImageUrl = data.image_url;
+                        updateHistory(`ویرایش: ${prompt}`, data.image_url);
+                    } else {
+                        alert('❌ خطا: ' + (data.error || 'مشخص نیست'));
+                    }
+                } catch (error) {
+                    document.getElementById('loading').classList.remove('show');
+                    alert('❌ خطا در ارتباط با سرور');
+                }
+                document.getElementById('editBtn').disabled = false;
+            });
+
+            renderHistory();
+        </script>
+    </body>
+    </html>
+    """
+
+# ==================== API تولید تصویر ====================
+def wait_for_replicate_result(prediction_id: str, timeout: int = 120):
     if not REPLICATE_API_TOKEN:
         return None
     
-    headers = {
-        "Authorization": f"Token {REPLICATE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
+    headers = {"Authorization": f"Token {REPLICATE_API_TOKEN}"}
     start_time = time.time()
+    
     while time.time() - start_time < timeout:
         try:
             response = requests.get(
@@ -149,32 +504,20 @@ def wait_for_replicate_result(prediction_id: str, timeout: int = 120) -> Optiona
                 headers=headers,
                 timeout=30
             )
-            
             if response.status_code == 200:
                 data = response.json()
-                status = data.get('status')
-                
-                if status == 'succeeded':
+                if data.get('status') == 'succeeded':
                     outputs = data.get('output', [])
-                    if outputs:
-                        return outputs[0]
+                    return outputs[0] if outputs else None
+                elif data.get('status') == 'failed':
                     return None
-                elif status == 'failed':
-                    logger.error(f"خطا: {data.get('error')}")
-                    return None
-            else:
-                logger.error(f"خطا: {response.status_code}")
-        except Exception as e:
-            logger.error(f"خطا: {e}")
-        
+        except:
+            pass
         time.sleep(2)
-    
     return None
 
-def generate_image_replicate(prompt: str) -> Optional[str]:
-    """تولید تصویر بدون محدودیت با FLUX Uncensored"""
+def generate_image(prompt: str, width: int = 1024, height: int = 1024, steps: int = 20, cfg: float = 5):
     if not REPLICATE_API_TOKEN:
-        logger.error("REPLICATE_API_TOKEN تنظیم نشده!")
         return None
     
     try:
@@ -183,17 +526,17 @@ def generate_image_replicate(prompt: str) -> Optional[str]:
             "Content-Type": "application/json"
         }
         
-        # ===== مدل بدون سانسور =====
+        # مدل بدون سانسور
         model = "aisha-ai-official/flux.1dev-uncensored-msfluxnsfw-v3:b477d8fc3a62e591c6224e10020538c4a9c340fb1f494891aff60019ffd5bc48"
         
         payload = {
             "version": model,
             "input": {
                 "prompt": prompt,
-                "width": 1024,
-                "height": 1024,
-                "steps": 20,
-                "cfg_scale": 5,
+                "width": width,
+                "height": height,
+                "steps": steps,
+                "cfg_scale": cfg,
                 "seed": -1,
                 "scheduler": "Euler flux beta"
             }
@@ -211,16 +554,75 @@ def generate_image_replicate(prompt: str) -> Optional[str]:
             prediction_id = data.get('id')
             if prediction_id:
                 return wait_for_replicate_result(prediction_id)
-        else:
-            logger.error(f"خطا: {response.status_code} - {response.text}")
-            return None
-            
+        return None
     except Exception as e:
-        logger.error(f"خطا: {e}")
+        logging.error(f"خطا: {e}")
         return None
 
-def edit_image_replicate(image_url: str, prompt: str) -> Optional[str]:
-    """ویرایش تصویر بدون محدودیت"""
+# ==================== مسیرهای API ====================
+@app.route('/generate', methods=['POST'])
+def generate():
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt')
+        width = data.get('width', 1024)
+        height = data.get('height', 1024)
+        steps = data.get('steps', 20)
+        cfg = data.get('cfg', 5)
+        
+        if not prompt:
+            return jsonify({'success': False, 'error': 'دستور وارد نشده'})
+        
+        image_url = generate_image(prompt, width, height, steps, cfg)
+        
+        if image_url:
+            return jsonify({'success': True, 'image_url': image_url})
+        else:
+            return jsonify({'success': False, 'error': 'خطا در تولید تصویر'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/edit', methods=['POST'])
+def edit():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': 'تصویری ارسال نشده'})
+        
+        file = request.files['image']
+        prompt = request.form.get('prompt')
+        strength = float(request.form.get('strength', 0.5))
+        
+        if not prompt:
+            return jsonify({'success': False, 'error': 'دستور وارد نشده'})
+        
+        # آپلود تصویر به تلگرام برای دریافت URL
+        files = {'photo': (file.filename, file.read(), file.content_type)}
+        response = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+            data={'chat_id': 'test'},
+            files=files
+        )
+        
+        if response.status_code == 200:
+            # دریافت URL تصویر
+            file_id = response.json()['result']['photo'][-1]['file_id']
+            file_info = requests.get(
+                f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+            ).json()
+            file_path = file_info['result']['file_path']
+            image_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+            
+            # ویرایش با Replicate
+            result_url = edit_image_replicate(image_url, prompt, strength)
+            
+            if result_url:
+                return jsonify({'success': True, 'image_url': result_url})
+        
+        return jsonify({'success': False, 'error': 'خطا در ویرایش'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+def edit_image_replicate(image_url: str, prompt: str, strength: float = 0.5):
     if not REPLICATE_API_TOKEN:
         return None
     
@@ -230,7 +632,6 @@ def edit_image_replicate(image_url: str, prompt: str) -> Optional[str]:
             "Content-Type": "application/json"
         }
         
-        # مدل بدون سانسور برای ویرایش
         model = "aisha-ai-official/flux.1dev-uncensored-msfluxnsfw-v3:b477d8fc3a62e591c6224e10020538c4a9c340fb1f494891aff60019ffd5bc48"
         
         payload = {
@@ -242,6 +643,7 @@ def edit_image_replicate(image_url: str, prompt: str) -> Optional[str]:
                 "height": 1024,
                 "steps": 20,
                 "cfg_scale": 5,
+                "strength": strength,
                 "seed": -1,
                 "scheduler": "Euler flux beta"
             }
@@ -259,350 +661,12 @@ def edit_image_replicate(image_url: str, prompt: str) -> Optional[str]:
             prediction_id = data.get('id')
             if prediction_id:
                 return wait_for_replicate_result(prediction_id)
-        else:
-            logger.error(f"خطا: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"خطا: {e}")
         return None
-
-# ==================== کیبورد ====================
-class BotKeyboard:
-    @staticmethod
-    def get_main_keyboard():
-        keyboard = [
-            ['🎨 تولید تصویر', '🖼️ ویرایش تصویر'],
-            ['📊 تاریخچه', '📈 آمار من'],
-            ['📖 راهنما', 'ℹ️ درباره']
-        ]
-        return {
-            'keyboard': keyboard,
-            'resize_keyboard': True,
-            'one_time_keyboard': False,
-            'persistent': True
-        }
-    
-    @staticmethod
-    def get_cancel_keyboard():
-        keyboard = [
-            ['❌ لغو عملیات']
-        ]
-        return {
-            'keyboard': keyboard,
-            'resize_keyboard': True,
-            'one_time_keyboard': False,
-            'persistent': True
-        }
-
-# ==================== تلگرام ====================
-class TelegramBot:
-    BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
-    
-    @staticmethod
-    def send_message(chat_id: str, text: str, parse_mode: str = 'Markdown', 
-                     reply_markup: Optional[Dict] = None) -> bool:
-        try:
-            payload = {
-                'chat_id': chat_id,
-                'text': text,
-                'parse_mode': parse_mode
-            }
-            if reply_markup is None:
-                reply_markup = BotKeyboard.get_main_keyboard()
-            payload['reply_markup'] = json.dumps(reply_markup)
-            
-            response = requests.post(
-                f"{TelegramBot.BASE_URL}/sendMessage",
-                json=payload,
-                timeout=10
-            )
-            return response.status_code == 200
-        except Exception as e:
-            logger.error(f"خطا در ارسال پیام: {e}")
-            return False
-
-# ==================== مدیریت کاربر ====================
-class UserManager:
-    @staticmethod
-    def register_user(update: Dict):
-        message = update.get('message', {})
-        chat = message.get('chat', {})
-        chat_id = str(chat.get('id'))
-        user = message.get('from', {})
-        
-        db.create_user(
-            chat_id=chat_id,
-            username=user.get('username', ''),
-            first_name=user.get('first_name', ''),
-            last_name=user.get('last_name', '')
-        )
-        return chat_id
-    
-    @staticmethod
-    def get_stats(chat_id: str) -> str:
-        user = db.get_user(chat_id)
-        if not user:
-            return "❌ کاربری یافت نشد."
-        
-        return f"""
-📊 **آمار شما**
-
-👤 کاربر: {user.get('first_name', 'ناشناس')}
-📅 تاریخ ثبت: {user.get('registered_at', 'نامشخص')}
-🖼️ تعداد تصاویر: {user.get('total_images', 0)}
-"""
-    
-    @staticmethod
-    def get_history(chat_id: str) -> str:
-        history = db.get_history(chat_id)
-        
-        if not history:
-            return "📭 هنوز تصویری تولید نکرده‌اید."
-        
-        text = "📜 **تاریخچه تصاویر شما**\n\n"
-        for i, item in enumerate(history, 1):
-            text += f"{i}. 📝 {item['prompt'][:50]}...\n"
-            text += f"   🕐 {item['created_at'][:16]}\n"
-            text += f"   🔗 [مشاهده تصویر]({item['image_url']})\n\n"
-        
-        return text
-    
-    @staticmethod
-    def get_help_message() -> str:
-        return """
-🎨 **راهنمای ربات تصویرسازی بدون محدودیت**
-
-🤖 **قابلیت‌ها:**
-1. 🎨 تولید تصویر از هر متنی
-2. 🖼️ ویرایش تصویر با هر دستوری
-3. 📊 تاریخچه تصاویر شما
-4. 📈 آمار استفاده
-
-📝 **نحوه استفاده:**
-• روی دکمه "🎨 تولید تصویر" کلیک کنید
-• هر دستوری که میخواید بنویسید
-• منتظر بمانید تا تصویر ساخته شود
-
-⚡ **مدل:** FLUX Uncensored - بدون محدودیت
-
-⚠️ **توجه:** تولید هر تصویر چند ثانیه زمان می‌برد.
-"""
-    
-    @staticmethod
-    def generate_image(chat_id: str, prompt: str) -> str:
-        db.increment_images(chat_id)
-        
-        TelegramBot.send_message(
-            chat_id,
-            "🎨 **در حال تولید تصویر...**\n\n⏳ لطفاً چند ثانیه صبر کنید."
-        )
-        
-        image_url = generate_image_replicate(prompt)
-        
-        if image_url:
-            db.save_image(chat_id, prompt, image_url, "flux-uncensored")
-            return f"""
-🎨 **تصویر شما آماده است!**
-
-📝 **دستور:** {prompt}
-
-🖼️ [مشاهده تصویر]({image_url})
-
-💡 برای تولید دوباره، دکمه "🎨 تولید تصویر" را بزنید.
-"""
-        else:
-            return """
-❌ **خطا در تولید تصویر!**
-
-لطفاً دوباره تلاش کنید.
-"""
-    
-    @staticmethod
-    def edit_image(chat_id: str, image_url: str, prompt: str) -> str:
-        db.increment_images(chat_id)
-        
-        TelegramBot.send_message(
-            chat_id,
-            "🖼️ **در حال ویرایش تصویر...**\n\n⏳ لطفاً چند ثانیه صبر کنید."
-        )
-        
-        result_url = edit_image_replicate(image_url, prompt)
-        
-        if result_url:
-            db.save_image(chat_id, f"ویرایش: {prompt}", result_url, "flux-uncensored")
-            return f"""
-🖼️ **تصویر ویرایش شده!**
-
-📝 **دستور:** {prompt}
-
-🖼️ [مشاهده تصویر]({result_url})
-
-💡 برای ویرایش دوباره، دکمه "🖼️ ویرایش تصویر" را بزنید.
-"""
-        else:
-            return """
-❌ **خطا در ویرایش تصویر!**
-
-لطفاً دوباره تلاش کنید.
-"""
-
-# ==================== وب‌هوک ====================
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = request.get_json()
-        if not update:
-            return jsonify({'status': 'ok'}), 200
-        
-        if 'message' in update:
-            message = update['message']
-            chat_id = str(message['chat']['id'])
-            text = message.get('text', '').strip()
-            photo = message.get('photo')
-            caption = message.get('caption', '').strip()
-            
-            UserManager.register_user(update)
-            
-            if text == '/start' or text == '/menu':
-                TelegramBot.send_message(
-                    chat_id,
-                    "🎨 **ربات تصویرسازی بدون محدودیت**\n\nسلام! 👋\nبا این ربات هر تصویری که میخواید بسازید:\n• 🎨 از هر متنی تصویر بسازید\n• 🖼️ هر تصویری را ویرایش کنید\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-                    reply_markup=BotKeyboard.get_main_keyboard()
-                )
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '🎨 تولید تصویر':
-                db.save_session(chat_id, 'generate_prompt')
-                TelegramBot.send_message(
-                    chat_id,
-                    "🎨 **تولید تصویر از متن**\n\nهر دستوری که میخواید بنویسید:\n\nمثال: «یک گربه سیاه در کنار دریاچه»",
-                    reply_markup=BotKeyboard.get_cancel_keyboard()
-                )
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '🖼️ ویرایش تصویر':
-                db.save_session(chat_id, 'edit_image')
-                TelegramBot.send_message(
-                    chat_id,
-                    "🖼️ **ویرایش تصویر**\n\nیک تصویر ارسال کنید و در کپشن آن دستور ویرایش را بنویسید.\n\nمثال: «پس‌زمینه را به جنگل تغییر بده»",
-                    reply_markup=BotKeyboard.get_cancel_keyboard()
-                )
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '📊 تاریخچه':
-                response = UserManager.get_history(chat_id)
-                TelegramBot.send_message(chat_id, response)
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '📈 آمار من':
-                response = UserManager.get_stats(chat_id)
-                TelegramBot.send_message(chat_id, response)
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '📖 راهنما':
-                TelegramBot.send_message(chat_id, UserManager.get_help_message())
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == 'ℹ️ درباره':
-                TelegramBot.send_message(
-                    chat_id,
-                    "ℹ️ **درباره ربات**\n\nنسخه ۲.۰.۰\nربات تصویرسازی بدون محدودیت\n\n⚡ **قابلیت‌ها:**\n• 🎨 تولید تصویر از هر متنی\n• 🖼️ ویرایش تصویر با هر دستوری\n• 📊 تاریخچه تصاویر\n• 📈 آمار کاربری\n\n🔧 **مدل:** FLUX Uncensored"
-                )
-                return jsonify({'status': 'ok'}), 200
-            
-            elif text == '❌ لغو عملیات':
-                db.delete_session(chat_id)
-                TelegramBot.send_message(
-                    chat_id,
-                    "❌ عملیات لغو شد.",
-                    reply_markup=BotKeyboard.get_main_keyboard()
-                )
-                return jsonify({'status': 'ok'}), 200
-            
-            # ===== پردازش عکس برای ویرایش =====
-            if photo and caption:
-                session = db.get_session(chat_id)
-                if session and session.get('step') == 'edit_image':
-                    file_id = photo[-1]['file_id']
-                    file_info = requests.get(
-                        f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
-                    ).json()
-                    file_path = file_info['result']['file_path']
-                    image_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-                    
-                    result = UserManager.edit_image(chat_id, image_url, caption)
-                    db.delete_session(chat_id)
-                    TelegramBot.send_message(chat_id, result)
-                    return jsonify({'status': 'ok'}), 200
-            
-            # ===== پردازش مراحل =====
-            session = db.get_session(chat_id)
-            if session:
-                step = session.get('step')
-                
-                if step == 'generate_prompt':
-                    result = UserManager.generate_image(chat_id, text)
-                    db.delete_session(chat_id)
-                    TelegramBot.send_message(chat_id, result)
-                    return jsonify({'status': 'ok'}), 200
-            
-            TelegramBot.send_message(
-                chat_id,
-                "🤔 دستور نامشخص.",
-                reply_markup=BotKeyboard.get_main_keyboard()
-            )
-            return jsonify({'status': 'ok'}), 200
-        
-        return jsonify({'status': 'ok'}), 200
-        
     except Exception as e:
-        logger.error(f"خطا: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# ==================== صفحه اصلی ====================
-@app.route('/')
-def home():
-    return """
-    <h1>🎨 ربات تصویرسازی بدون محدودیت</h1>
-    <p>ربات آنلاین و فعال است ✅</p>
-    <p>⚡ FLUX Uncensored - بدون هیچ محدودیتی</p>
-    <p>نسخه ۲.۰.۰</p>
-    """
-
-# ==================== منوی پایین ====================
-def set_bot_commands():
-    try:
-        commands = [
-            {"command": "start", "description": "🔄 شروع مجدد"},
-            {"command": "menu", "description": "📋 منوی اصلی"},
-            {"command": "history", "description": "📊 تاریخچه"},
-            {"command": "stats", "description": "📈 آمار من"},
-            {"command": "help", "description": "📖 راهنما"}
-        ]
-        
-        url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
-        response = requests.post(url, json={"commands": commands}, timeout=10)
-        
-        if response.status_code == 200:
-            logger.info("✅ منوی پایین ثبت شد")
-            return True
-        else:
-            logger.error(f"❌ خطا: {response.text}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ خطا: {e}")
-        return False
+        logging.error(f"خطا: {e}")
+        return None
 
 # ==================== اجرا ====================
 if __name__ == '__main__':
-    print("🎨 ثبت منوی پایین...")
-    set_bot_commands()
-    
-    if not REPLICATE_API_TOKEN:
-        print("⚠️ هشدار: REPLICATE_API_TOKEN تنظیم نشده!")
-    
     port = int(os.environ.get('PORT', 5000))
-    print(f"🚀 ربات روی پورت {port} اجرا شد")
     app.run(host='0.0.0.0', port=port, debug=False)
